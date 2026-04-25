@@ -19,6 +19,9 @@
 #include <time.h>
 #ifdef __AVX2__
 #include <immintrin.h>
+#ifdef __wasm_simd128__
+#include "../include/wasm_compat.h"
+#endif
 #endif
 
 /* Weight decryption (optional, linked from crypto/weight_crypto.c) */

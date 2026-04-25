@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FaceX — Face Recognition in Your Browser</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
+
+.header { text-align: center; padding: 32px 20px 16px; }
+.header h1 { font-size: 28px; color: #fff; }
+.header h1 span { color: #10b981; }
+.header p { color: #666; font-size: 14px; margin-top: 6px; }
+
+.status { text-align: center; padding: 12px; font-size: 14px; }
+.status.loading { color: #f59e0b; }
+.status.ready { color: #10b981; }
+.status.error { color: #ef4444; }
+
+.main { max-width: 800px; margin: 0 auto; padding: 0 20px 40px; }
+
+.cameras { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+
+.cam-box { background: #1a1a1a; border: 2px solid #2a2a2a; border-radius: 12px; overflow: hidden; width: 320px; }
+.cam-box.match { border-color: #10b981; }
+.cam-box.nomatch { border-color: #ef4444; }
+.cam-label { padding: 10px 14px; font-size: 13px; font-weight: 600; color: #888; background: #111; display: flex; align-items: center; gap: 8px; }
+.cam-label .dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+.cam-label .dot.on { background: #10b981; }
+
+video, canvas { width: 100%; display: block; background: #000; }
+canvas.hidden { display: none; }
+
+.controls { text-align: center; margin: 20px 0; }
+.btn { background: #10b981; color: #fff; border: none; padding: 12px 28px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin: 0 6px; transition: all 0.2s; }
+.btn:hover { background: #059669; }
+.btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+.btn.danger { background: #ef4444; }
+.btn.danger:hover { background: #dc2626; }
+.btn.secondary { background: #333; color: #ccc; }
+.btn.secondary:hover { background: #444; }
+
+.result { text-align: center; padding: 20px; margin: 16px 0; border-radius: 12px; font-size: 18px; font-weight: 600; }
+.result.match { background: #052e16; color: #10b981; border: 1px solid #10b981; }
+.result.nomatch { background: #2a0a0a; color: #ef4444; border: 1px solid #ef4444; }
+.result.pending { background: #1a1a1a; color: #666; border: 1px solid #333; }
+
+.stats { display: flex; gap: 20px; justify-content: center; margin: 16px 0; flex-wrap: wrap; }
+.stat { text-align: center; }
+.stat-val { font-size: 28px; font-weight: 700; color: #10b981; }
+.stat-label { font-size: 12px; color: #666; margin-top: 2px; }
+
+.info { max-width: 500px; margin: 30px auto; padding: 20px; background: #111; border-radius: 12px; border: 1px solid #222; }
+.info h3 { color: #fff; font-size: 15px; margin-bottom: 10px; }
+.info p { font-size: 13px; color: #888; line-height: 1.6; margin-bottom: 8px; }
+.info code { background: #222; padding: 2px 6px; border-radius: 4px; color: #10b981; font-size: 12px; }
+
+.upload-area { border: 2px dashed #333; border-radius: 12px; padding: 30px; text-align: center; margin: 12px 0; cursor: pointer; transition: border-color 0.2s; }
+.upload-area:hover { border-color: #10b981; }
+.upload-area p { color: #666; font-size: 14px; }
+.upload-area input { display: none; }
+
+.preview-img { max-width: 200px; max-height: 200px; border-radius: 8px; margin: 10px auto; display: block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Face<span>X</span></h1>
+  <p>Face recognition in your browser. No server. No upload. Everything stays on your device.</p>
+</div>
+
+<div id="status" class="status loading">Loading FaceX engine...</div>
+
+<div class="main">
+
+<div class="controls">
+  <button id="btnCamera" class="btn" disabled onclick="startCamera()">Start Camera</button>
+  <button id="btnCapture" class="btn secondary" disabled onclick="captureReference()">Capture My Face</button>
+  <button id="btnCompare" class="btn" disabled onclick="startComparing()">Start Recognition</button>
+  <button id="btnStop" class="btn danger" style="display:none" onclick="stopComparing()">Stop</button>
+</div>
+
+<div class="cameras">
+  <div class="cam-box" id="camBox">
+    <div class="cam-label"><span class="dot" id="camDot"></span> Camera</div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" class="hidden" width="112" height="112"></canvas>
+  </div>
+  <div class="cam-box" id="refBox" style="display:none">
+    <div class="cam-label"><span class="dot on"></span> Reference</div>
+    <canvas id="refCanvas" width="112" height="112" style="width:100%;image-rendering:pixelated;"></canvas>
+  </div>
+</div>
+
+<div id="result" class="result pending">Load engine, then start camera</div>
+
+<div class="stats" id="stats" style="display:none">
+  <div class="stat"><div class="stat-val" id="simVal">—</div><div class="stat-label">Similarity</div></div>
+  <div class="stat"><div class="stat-val" id="timeVal">—</div><div class="stat-label">Inference</div></div>
+  <div class="stat"><div class="stat-val" id="fpsVal">—</div><div class="stat-label">FPS</div></div>
+</div>
+
+<div class="info">
+  <h3>How it works</h3>
+  <p>FaceX runs a neural network <strong>entirely in your browser</strong> using WebAssembly. Your camera feed never leaves your device — no server, no cloud, no tracking.</p>
+  <p>The engine converts each face into 512 numbers (an "embedding"). When two embeddings are similar enough, it's the same person.</p>
+  <p>Engine size: <code>46 KB</code> WASM. Model weights loaded separately.</p>
+</div>
+
+</div>
+
+<script src="facex.js"></script>
+<script>
+let Module = null;
+let facex_init, facex_embed, facex_similarity, facex_free;
+let fxHandle = 0;
+let refEmbedding = null;
+let comparing = false;
+let stream = null;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const refCanvas = document.getElementById('refCanvas');
+const refCtx = refCanvas.getContext('2d');
+
+async function init() {
+  try {
+    Module = await FaceXModule();
+
+    facex_init = Module.cwrap('facex_init', 'number', ['string', 'string']);
+    facex_embed = Module.cwrap('facex_embed', 'number', ['number', 'number', 'number']);
+    facex_similarity = Module.cwrap('facex_similarity', 'number', ['number', 'number']);
+    facex_free = Module.cwrap('facex_free', null, ['number']);
+
+    document.getElementById('status').textContent = 'Engine loaded. Need weights file to initialize.';
+    document.getElementById('status').className = 'status ready';
+
+    // Try to load weights
+    await loadWeights();
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+    document.getElementById('status').className = 'status error';
+  }
+}
+
+async function loadWeights() {
+  const status = document.getElementById('status');
+  status.textContent = 'Loading model weights...';
+  status.className = 'status loading';
+
+  try {
+    const resp = await fetch('edgeface_xs_fp32.bin');
+    if (!resp.ok) {
+      status.textContent = 'Ready (place edgeface_xs_fp32.bin in wasm/ folder, then serve via HTTP)';
+      status.className = 'status loading';
+      document.getElementById('btnCamera').disabled = false;
+      return;
+    }
+    const buf = await resp.arrayBuffer();
+    const data = new Uint8Array(buf);
+
+    // Write to WASM filesystem
+    Module.FS.writeFile('/weights.bin', data);
+
+    // Init engine
+    fxHandle = facex_init('/weights.bin', null);
+    if (!fxHandle) {
+      status.textContent = 'Error: failed to initialize engine';
+      status.className = 'status error';
+      return;
+    }
+
+    status.textContent = 'FaceX ready — ' + (buf.byteLength / 1024 / 1024).toFixed(1) + ' MB model loaded';
+    status.className = 'status ready';
+    document.getElementById('btnCamera').disabled = false;
+  } catch(e) {
+    status.textContent = 'Weights not found. Serve this folder via HTTP with edgeface_xs_fp32.bin';
+    status.className = 'status loading';
+    document.getElementById('btnCamera').disabled = false;
+  }
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' }
+    });
+    video.srcObject = stream;
+    document.getElementById('camDot').classList.add('on');
+    document.getElementById('btnCamera').disabled = true;
+    document.getElementById('btnCapture').disabled = false;
+    document.getElementById('result').textContent = 'Camera on. Click "Capture My Face" to set reference.';
+  } catch(e) {
+    document.getElementById('result').textContent = 'Camera error: ' + e.message;
+    document.getElementById('result').className = 'result nomatch';
+  }
+}
+
+function getFrameEmbedding() {
+  // Draw video frame to 112x112 canvas
+  ctx.drawImage(video, 0, 0, 112, 112);
+  const imageData = ctx.getImageData(0, 0, 112, 112);
+  const pixels = imageData.data; // RGBA
+
+  // Convert to float32 RGB HWC [-1, 1]
+  const nPixels = 112 * 112 * 3;
+  const inputPtr = Module._malloc(nPixels * 4);
+  const embPtr = Module._malloc(512 * 4);
+
+  for (let i = 0; i < 112 * 112; i++) {
+    const r = (pixels[i * 4] / 127.5) - 1.0;
+    const g = (pixels[i * 4 + 1] / 127.5) - 1.0;
+    const b = (pixels[i * 4 + 2] / 127.5) - 1.0;
+    Module.setValue(inputPtr + (i * 3) * 4, r, 'float');
+    Module.setValue(inputPtr + (i * 3 + 1) * 4, g, 'float');
+    Module.setValue(inputPtr + (i * 3 + 2) * 4, b, 'float');
+  }
+
+  const t0 = performance.now();
+  facex_embed(fxHandle, inputPtr, embPtr);
+  const dt = performance.now() - t0;
+
+  // Copy embedding out
+  const emb = new Float32Array(512);
+  for (let i = 0; i < 512; i++) {
+    emb[i] = Module.getValue(embPtr + i * 4, 'float');
+  }
+
+  Module._free(inputPtr);
+  Module._free(embPtr);
+
+  return { emb, dt };
+}
+
+function captureReference() {
+  if (!fxHandle) {
+    document.getElementById('result').textContent = 'Engine not loaded — need weights file';
+    document.getElementById('result').className = 'result nomatch';
+    return;
+  }
+
+  const { emb, dt } = getFrameEmbedding();
+  refEmbedding = emb;
+
+  // Show reference image
+  refCtx.drawImage(video, 0, 0, 112, 112);
+  document.getElementById('refBox').style.display = 'block';
+
+  document.getElementById('result').textContent = 'Reference captured (' + dt.toFixed(0) + 'ms). Click "Start Recognition".';
+  document.getElementById('result').className = 'result pending';
+  document.getElementById('btnCompare').disabled = false;
+}
+
+function computeSimilarity(emb1, emb2) {
+  // Allocate two embedding buffers
+  const ptr1 = Module._malloc(512 * 4);
+  const ptr2 = Module._malloc(512 * 4);
+  for (let i = 0; i < 512; i++) {
+    Module.setValue(ptr1 + i * 4, emb1[i], 'float');
+    Module.setValue(ptr2 + i * 4, emb2[i], 'float');
+  }
+  const sim = facex_similarity(ptr1, ptr2);
+  Module._free(ptr1);
+  Module._free(ptr2);
+  return sim;
+}
+
+function startComparing() {
+  comparing = true;
+  document.getElementById('btnCompare').style.display = 'none';
+  document.getElementById('btnStop').style.display = 'inline-block';
+  document.getElementById('btnCapture').disabled = true;
+  document.getElementById('stats').style.display = 'flex';
+  compareLoop();
+}
+
+function stopComparing() {
+  comparing = false;
+  document.getElementById('btnCompare').style.display = 'inline-block';
+  document.getElementById('btnStop').style.display = 'none';
+  document.getElementById('btnCapture').disabled = false;
+}
+
+function compareLoop() {
+  if (!comparing) return;
+
+  const { emb, dt } = getFrameEmbedding();
+  const sim = computeSimilarity(refEmbedding, emb);
+
+  const isMatch = sim > 0.3;
+  const resultEl = document.getElementById('result');
+  const camBox = document.getElementById('camBox');
+
+  if (isMatch) {
+    resultEl.textContent = 'MATCH — Same person (' + (sim * 100).toFixed(1) + '%)';
+    resultEl.className = 'result match';
+    camBox.className = 'cam-box match';
+  } else {
+    resultEl.textContent = 'NO MATCH — Different person (' + (sim * 100).toFixed(1) + '%)';
+    resultEl.className = 'result nomatch';
+    camBox.className = 'cam-box nomatch';
+  }
+
+  document.getElementById('simVal').textContent = (sim * 100).toFixed(1) + '%';
+  document.getElementById('timeVal').textContent = dt.toFixed(0) + 'ms';
+  document.getElementById('fpsVal').textContent = (1000 / dt).toFixed(0);
+
+  requestAnimationFrame(compareLoop);
+}
+
+init();
+</script>
+
+</body>
+</html>

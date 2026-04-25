@@ -13,6 +13,9 @@
 
 #ifdef __AVX2__
 #include <immintrin.h>
+#ifdef __wasm_simd128__
+#include "../include/wasm_compat.h"
+#endif
 #endif
 
 /* ============ LayerNorm ============ */
