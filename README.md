@@ -7,7 +7,7 @@
 <p align="center">
 
 [![Language: C99](https://img.shields.io/badge/language-C99-blue.svg)](https://en.wikipedia.org/wiki/C99)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/license-CC_BY--NC--SA_4.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: x86-64](https://img.shields.io/badge/platform-x86__64-lightgrey.svg)](#limitations)
 [![AVX2 / AVX-512](https://img.shields.io/badge/SIMD-AVX2_%2F_AVX--512-blueviolet.svg)](#architecture)
 [![LFW](https://img.shields.io/badge/LFW-99.73%25-success.svg)](#benchmarks)
@@ -305,9 +305,9 @@ A: EdgeFace-XS gets 99.73% LFW vs ArcFace-R100's 99.80%. The 0.07%
 gap buys you 10x speed and 60x smaller model.
 
 **Q: Can I use this commercially?**
-A: The model weights are CC BY-NC-SA 4.0 (non-commercial). For commercial
-use, train your own weights or contact for licensing. The engine code
-itself has no restriction.
+A: The engine code is Apache 2.0 -- fully commercial. The bundled model
+weights are CC BY-NC-SA 4.0 (non-commercial). For commercial use, train
+your own weights or contact for licensing.
 
 **Q: Does it do face detection?**
 A: No. FaceX is the embedding step only. Pair it with any face detector
@@ -330,9 +330,10 @@ A: No. FaceX is the embedding step only. Pair it with any face detector
 
 ## License
 
-Code: permissive (see [LICENSE](LICENSE)).
+Code: [Apache License 2.0](LICENSE) -- free for commercial use.
 Model weights: [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-(follows upstream EdgeFace license).
+(follows upstream EdgeFace license). Train your own weights for
+unrestricted commercial use.
 
 For commercial licensing: [bauratynov@gmail.com](mailto:bauratynov@gmail.com)
 
