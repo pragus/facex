@@ -146,6 +146,20 @@ sim := facex.CosSim(embA, embB)
 ./facex-cli weights.bin --server < faces.raw > embeddings.raw
 ```
 
+### Browser (WebAssembly)
+
+```html
+<script src="facex.js"></script>
+<script>
+const Module = await FaceXModule();
+const fx = Module.cwrap('facex_init', 'number', ['string', 'string'])('/weights.bin', null);
+// 7ms per face, runs entirely in browser, no server needed
+</script>
+```
+
+48 KB WASM module. Face recognition with zero server infrastructure.
+See [`wasm/`](wasm/) for the full browser demo with live camera.
+
 ---
 
 ## Build
@@ -242,13 +256,13 @@ touch disk in plaintext on the target machine.
 
 ## Integration paths
 
-| Language | Method | Latency overhead |
-|----------|--------|:----------------:|
-| **C / C++** | `libfacex.a` + `facex.h` | 0 (native) |
-| **Go** | `go/facex` subprocess | ~1 ms IPC |
-| **Python** | subprocess / ctypes | ~1 ms IPC |
-| **Any** | `facex-cli --server` stdin/stdout | ~1 ms IPC |
-| **HTTP** | wrap in your server | your choice |
+| Language | Method | Latency |
+|----------|--------|:-------:|
+| **C / C++** | `libfacex.a` + `facex.h` | 3 ms (native) |
+| **Browser** | `facex.wasm` (48 KB) | 7 ms (WASM SIMD) |
+| **Go** | `go/facex` subprocess | ~4 ms |
+| **Python** | subprocess / ctypes | ~4 ms |
+| **Any** | `facex-cli --server` stdin/stdout | ~4 ms |
 
 ---
 
