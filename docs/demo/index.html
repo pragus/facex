@@ -342,31 +342,41 @@ $('btnCapture').onclick = () => {
   setTimeout(() => { doCapture(); }, 50);
 };
 function doCapture() {
-  // Try 96 first (fast on mobile), fall back to 160 if no face
-  let { faces, detMs } = runDetect(96);
-  if (!faces.length) {
-    $('resultBar').textContent = 'Retrying at higher resolution...';
-    const r2 = runDetect(160);
-    faces = r2.faces; detMs += r2.detMs;
-  }
+  $('resultBar').textContent = 'Detecting face (96px)...';
+  setTimeout(() => {
+    let { faces, detMs } = runDetect(96);
+    if (faces.length) {
+      finishCapture(faces, detMs);
+    } else {
+      $('resultBar').textContent = 'Not found. Retrying at 160px (may take a few seconds)...';
+      setTimeout(() => {
+        const r2 = runDetect(160);
+        finishCapture(r2.faces, detMs + r2.detMs);
+      }, 50);
+    }
+  }, 50);
+}
+function finishCapture(faces, detMs) {
   $('btnCapture').disabled = false;
   $('btnCapture').textContent = 'Set Reference';
   if (!faces.length) {
-    $('resultBar').textContent = 'No face detected (took ' + detMs.toFixed(0) + 'ms). Move closer, ensure good lighting.';
+    $('resultBar').textContent = 'No face detected (' + detMs.toFixed(0) + 'ms). Move closer, ensure good lighting.';
     $('resultBar').className = 'result-bar nomatch';
     return;
   }
   $('resultBar').textContent = 'Face found! Computing embedding...';
-  const aligned = alignAndCrop(faces[0]);
-  refCtx.putImageData(aligned, 0, 0);
-  const { emb, embMs } = runEmbed(aligned);
-  refEmb = emb;
-  $('refBar').style.display = 'flex';
-  $('btnVerify').style.display = 'inline-block'; $('btnVerify').disabled = false;
-  $('resultBar').textContent = 'Reference set (detect ' + detMs.toFixed(0) + 'ms + embed ' + embMs.toFixed(0) + 'ms). Click "Verify".';
-  $('resultBar').className = 'result-bar idle';
-  drawFaces(faces);
-  liveness.reset();
+  setTimeout(() => {
+    const aligned = alignAndCrop(faces[0]);
+    refCtx.putImageData(aligned, 0, 0);
+    const { emb, embMs } = runEmbed(aligned);
+    refEmb = emb;
+    $('refBar').style.display = 'flex';
+    $('btnVerify').style.display = 'inline-block'; $('btnVerify').disabled = false;
+    $('resultBar').textContent = 'Reference set (detect ' + detMs.toFixed(0) + 'ms + embed ' + embMs.toFixed(0) + 'ms). Click "Verify".';
+    $('resultBar').className = 'result-bar idle';
+    drawFaces(faces);
+    liveness.reset();
+  }, 50);
 }
 
 // ===== Verify Loop =====
