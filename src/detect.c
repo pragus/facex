@@ -386,19 +386,57 @@ int detect_run(Detect* det, const uint8_t* rgb_hwc, int width, int height,
                 float sc = sigm(cls[idx]) * sigm(obj[idx]);
                 if (sc < det->score_threshold) continue;
                 float cx = (gx + 0.5f) * st, cy = (gy + 0.5f) * st;
-                out[nf].x1 = cx - hd[0*hw+idx] * st;
-                out[nf].y1 = cy - hd[1*hw+idx] * st;
-                out[nf].x2 = cx + hd[2*hw+idx] * st;
-                out[nf].y2 = cy + hd[3*hw+idx] * st;
+                out[nf].x1 = fmaxf(0, cx - hd[0*hw+idx] * st);
+                out[nf].y1 = fmaxf(0, cy - hd[1*hw+idx] * st);
+                out[nf].x2 = fminf((float)width, cx + hd[2*hw+idx] * st);
+                out[nf].y2 = fminf((float)height, cy + hd[3*hw+idx] * st);
+                /* Filter degenerate boxes */
+                float bw = out[nf].x2 - out[nf].x1;
+                float bh = out[nf].y2 - out[nf].y1;
+                if (bw < 16 || bh < 16) continue;         /* too small */
+                if (bw > width*0.95f || bh > height*0.95f) continue; /* too large */
+                float aspect = bw / (bh + 1e-6f);
+                if (aspect < 0.3f || aspect > 3.0f) continue; /* bad aspect ratio */
                 out[nf].score = sc;
                 for (int k = 0; k < 5; k++) {
-                    out[nf].kps[k*2]   = cx + hd[(4+k*2)*hw+idx] * st;
-                    out[nf].kps[k*2+1] = cy + hd[(4+k*2+1)*hw+idx] * st;
+                    out[nf].kps[k*2]   = fmaxf(0, fminf((float)width,  cx + hd[(4+k*2)*hw+idx] * st));
+                    out[nf].kps[k*2+1] = fmaxf(0, fminf((float)height, cy + hd[(4+k*2+1)*hw+idx] * st));
                 }
                 nf++;
             }
     }
     if (nf > 1) nf = nms_sort(out, nf, det->nms_threshold);
+
+    /* Cross-scale merge: if two faces have nose keypoints within 20px,
+     * keep only the one with better score. This handles multi-scale
+     * detections of the same face at different strides. */
+    if (nf > 1) {
+        for (int i = 0; i < nf; i++) {
+            if (out[i].score < 0) continue; /* already merged */
+            for (int j = i + 1; j < nf; j++) {
+                if (out[j].score < 0) continue;
+                /* Compare nose keypoints (index 4,5) */
+                float dx = out[i].kps[4] - out[j].kps[4];
+                float dy = out[i].kps[5] - out[j].kps[5];
+                float dist = sqrtf(dx*dx + dy*dy);
+                /* Also compare eye midpoints */
+                float ei_x = (out[i].kps[0] + out[i].kps[2]) * 0.5f;
+                float ei_y = (out[i].kps[1] + out[i].kps[3]) * 0.5f;
+                float ej_x = (out[j].kps[0] + out[j].kps[2]) * 0.5f;
+                float ej_y = (out[j].kps[1] + out[j].kps[3]) * 0.5f;
+                float eye_dist = sqrtf((ei_x-ej_x)*(ei_x-ej_x) + (ei_y-ej_y)*(ei_y-ej_y));
+                if (dist < 25.0f || eye_dist < 20.0f) {
+                    out[j].score = -1; /* suppress */
+                }
+            }
+        }
+        /* Compact */
+        int k = 0;
+        for (int i = 0; i < nf; i++)
+            if (out[i].score > 0) { if (k != i) out[k] = out[i]; k++; }
+        nf = k;
+    }
+
     return nf;
 }
 
