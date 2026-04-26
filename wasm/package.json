@@ -1,29 +1,38 @@
 {
-  "name": "facex-web",
-  "version": "1.0.0",
-  "description": "Face recognition in the browser. 74 KB WASM. No server, no dependencies.",
-  "main": "facex-sdk.js",
-  "types": "facex-sdk.d.ts",
+  "name": "facex-wasm",
+  "version": "0.1.0",
+  "description": "Face recognition in the browser. 75 KB WASM. Detect, align, embed, verify — no server, no dependencies.",
+  "main": "index.js",
+  "types": "index.d.ts",
   "files": [
+    "index.js",
+    "index.d.ts",
     "facex-sdk.js",
     "facex-sdk.d.ts",
     "align.js",
+    "liveness.js",
+    "cache.js",
+    "simd_check.js",
+    "worker.js",
     "detect.js",
     "detect.wasm",
     "facex.js",
-    "facex.wasm"
+    "facex.wasm",
+    "README.md"
   ],
   "keywords": [
     "face-recognition",
     "face-detection",
     "face-embedding",
+    "face-verification",
+    "liveness",
     "webassembly",
     "wasm",
     "simd",
     "browser",
     "privacy",
-    "zero-dependencies",
-    "offline"
+    "offline",
+    "zero-dependencies"
   ],
   "author": "Baurzhan Atinov",
   "license": "Apache-2.0",
@@ -32,5 +41,15 @@
     "type": "git",
     "url": "https://github.com/facex-engine/facex.git",
     "directory": "wasm"
-  }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=16"
+  },
+  "browserslist": [
+    "Chrome >= 91",
+    "Firefox >= 89",
+    "Safari >= 16.4",
+    "Edge >= 91"
+  ]
 }
