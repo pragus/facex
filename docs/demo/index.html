@@ -181,7 +181,7 @@ async function init() {
 
     s.textContent = 'Loading weights (cached after first load)...';
     const [dw, fw] = await Promise.all([
-      cachedFetch('det_500m_int8.bin', 'det'), cachedFetch('https://github.com/facex-engine/facex/releases/download/v1.0.0/edgeface_xs_fp32.bin', 'emb')
+      cachedFetch('det_500m_int8.bin', 'det'), cachedFetch('edgeface_xs_fp32.bin', 'emb')
     ]);
     DetMod.FS.writeFile('/d.bin', dw); FxMod.FS.writeFile('/e.bin', fw);
 
