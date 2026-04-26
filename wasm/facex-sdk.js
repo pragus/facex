@@ -14,7 +14,7 @@ class FaceXSDK {
   constructor(options = {}) {
     this.detSize = options.detSize || 160;
     this.threshold = options.threshold || 0.3;
-    this.detWeightsUrl = options.detWeightsUrl || 'det_500m_int8.bin';
+    this.detWeightsUrl = options.detWeightsUrl || 'yunet_fp32.bin';
     this.embWeightsUrl = options.embWeightsUrl || 'edgeface_xs_fp32.bin';
     this.onProgress = options.onProgress || null;
 
@@ -49,7 +49,7 @@ class FaceXSDK {
     this._fx = await FaceXModule();
 
     // Load weights with caching
-    this._progress('Loading detector weights (670 KB)...');
+    this._progress('Loading detector weights (208 KB)...');
     const detW = await this._loadCached(this.detWeightsUrl, 'facex_det_weights');
     this._det.FS.writeFile('/det.bin', detW);
 

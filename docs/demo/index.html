@@ -226,7 +226,7 @@ async function init() {
       // Desktop: load detector + embedder
       [DetMod, FxMod] = await Promise.all([FaceDetModule(), FaceXModule()]);
       setLog('Downloading weights...');
-      const [dw, fw] = await Promise.all([loadCached('det_500m_int8.bin','det'), loadCached('edgeface_xs_fp32.bin','emb')]);
+      const [dw, fw] = await Promise.all([loadCached('yunet_fp32.bin','det'), loadCached('edgeface_xs_fp32.bin','emb')]);
       DetMod.FS.writeFile('/d.bin', dw); FxMod.FS.writeFile('/e.bin', fw);
       detH = DetMod.cwrap('detect_init','number',['string'])('/d.bin');
       fxH = FxMod.cwrap('facex_init','number',['string','string'])('/e.bin', null);
