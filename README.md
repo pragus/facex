@@ -10,6 +10,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![LFW](https://img.shields.io/badge/LFW-99.73%25-success.svg)](#benchmarks)
 [![Latency](https://img.shields.io/badge/latency-3.0_ms-brightgreen.svg)](#benchmarks)
+[![Platform](https://img.shields.io/badge/Linux_%7C_macOS_%7C_Windows_%7C_Browser-lightgrey.svg)](#architecture)
 [![WASM](https://img.shields.io/badge/WASM-74_KB-blueviolet.svg)](#browser)
 [![Deps](https://img.shields.io/badge/dependencies-zero-green.svg)](#architecture)
 
