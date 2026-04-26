@@ -223,9 +223,9 @@ $('btnStart').onclick = async () => {
 };
 
 // ===== Detect =====
-function runDetect() {
+function runDetect(size) {
   const W = video.videoWidth, H = video.videoHeight;
-  const ds = 320;
+  const ds = size || 160;
   const detCv = document.createElement('canvas'); detCv.width = ds; detCv.height = ds;
   const dCtx = detCv.getContext('2d', { willReadFrequently: true });
   const scale = Math.min(ds/W, ds/H);
@@ -308,18 +308,40 @@ function drawFaces(faces, isMatch) {
 
 // ===== Capture Reference =====
 $('btnCapture').onclick = () => {
-  const { faces } = runDetect();
-  if (!faces.length) { $('resultBar').textContent = 'No face detected — look at camera'; $('resultBar').className = 'result-bar nomatch'; return; }
+  $('btnCapture').disabled = true;
+  $('btnCapture').textContent = 'Detecting...';
+  $('resultBar').textContent = 'Looking for face...';
+  $('resultBar').className = 'result-bar idle';
+  // Defer to let UI update before heavy WASM call
+  setTimeout(() => { doCapture(); }, 50);
+};
+function doCapture() {
+  // Try 160 first (fast), fall back to 320 if no face found
+  let { faces, detMs } = runDetect(160);
+  if (!faces.length) {
+    $('resultBar').textContent = 'Retrying at higher resolution...';
+    const r2 = runDetect(320);
+    faces = r2.faces; detMs = r2.detMs;
+  }
+  $('btnCapture').disabled = false;
+  $('btnCapture').textContent = 'Set Reference';
+  if (!faces.length) {
+    $('resultBar').textContent = 'No face detected (took ' + detMs.toFixed(0) + 'ms). Move closer, ensure good lighting.';
+    $('resultBar').className = 'result-bar nomatch';
+    return;
+  }
+  $('resultBar').textContent = 'Face found! Computing embedding...';
   const aligned = alignAndCrop(faces[0]);
   refCtx.putImageData(aligned, 0, 0);
-  const { emb } = runEmbed(aligned);
+  const { emb, embMs } = runEmbed(aligned);
   refEmb = emb;
   $('refBar').style.display = 'flex';
   $('btnVerify').style.display = 'inline-block'; $('btnVerify').disabled = false;
-  $('resultBar').textContent = 'Reference set. Click "Verify".'; $('resultBar').className = 'result-bar idle';
+  $('resultBar').textContent = 'Reference set (detect ' + detMs.toFixed(0) + 'ms + embed ' + embMs.toFixed(0) + 'ms). Click "Verify".';
+  $('resultBar').className = 'result-bar idle';
   drawFaces(faces);
   liveness.reset();
-};
+}
 
 // ===== Verify Loop =====
 $('btnVerify').onclick = () => {
