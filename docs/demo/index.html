@@ -3,487 +3,228 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FaceX — Face Recognition in Your Browser</title>
+<title>FaceX Demo</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
-
-.header { text-align: center; padding: 24px 16px 8px; }
-.header h1 { font-size: 24px; color: #fff; }
-.header h1 span { color: #10b981; }
-.header p { color: #555; font-size: 13px; margin-top: 4px; }
-
-.status { text-align: center; padding: 8px; font-size: 13px; transition: color 0.3s; }
-.status.loading { color: #f59e0b; }
-.status.ready { color: #10b981; }
-.status.error { color: #ef4444; }
-
-.main { max-width: 480px; margin: 0 auto; padding: 0 12px 40px; }
-
-.video-wrap { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #111; margin-bottom: 12px; border: 2px solid #222; transition: border-color 0.3s; }
-.video-wrap.match { border-color: #10b981; }
-.video-wrap.nomatch { border-color: #ef4444; }
-video { width: 100%; display: block; transform: scaleX(-1); }
-canvas.overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; transform: scaleX(-1); }
-
-.controls { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
-.btn { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
-.btn:active { transform: scale(0.97); }
-.btn-go { background: #10b981; color: #fff; }
-.btn-go:hover { background: #059669; }
-.btn-stop { background: #ef4444; color: #fff; }
-.btn-sec { background: #222; color: #aaa; border: 1px solid #333; }
-.btn-sec:hover { background: #333; }
-.btn:disabled { background: #1a1a1a; color: #444; cursor: not-allowed; border-color: #1a1a1a; }
-
-.ref-bar { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 10px 0; padding: 10px; background: #111; border-radius: 10px; border: 1px solid #222; }
-.ref-bar canvas { width: 56px; height: 56px; border-radius: 6px; border: 1px solid #333; }
-.ref-bar .label { font-size: 12px; color: #888; }
-
-.result-bar { text-align: center; padding: 14px; margin: 10px 0; border-radius: 10px; font-size: 15px; font-weight: 600; transition: all 0.2s; }
-.result-bar.match { background: #052e16; color: #10b981; border: 1px solid #166534; }
-.result-bar.nomatch { background: #1c0a0a; color: #ef4444; border: 1px solid #7f1d1d; }
-.result-bar.idle { background: #111; color: #555; border: 1px solid #222; }
-
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
-.stat { text-align: center; background: #111; border-radius: 8px; padding: 8px 4px; border: 1px solid #1a1a1a; }
-.stat-val { font-size: 18px; font-weight: 700; color: #10b981; }
-.stat-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
-
-.liveness-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #111; border-radius: 8px; margin: 8px 0; border: 1px solid #222; }
-.liveness-dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; transition: background 0.3s; }
-.liveness-dot.live { background: #10b981; }
-.liveness-text { font-size: 12px; color: #888; }
-
-.info { background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 10px; padding: 14px; margin-top: 16px; }
-.info h3 { font-size: 13px; color: #999; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.info p { font-size: 12px; color: #555; line-height: 1.6; margin-bottom: 4px; }
-.info code { background: #1a1a1a; padding: 1px 4px; border-radius: 3px; color: #10b981; font-size: 11px; }
-
-.error-msg { text-align: center; padding: 16px; background: #1c0a0a; border: 1px solid #7f1d1d; border-radius: 10px; margin: 12px 0; color: #ef4444; font-size: 13px; display: none; }
+body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; text-align: center; padding: 16px; }
+h1 { font-size: 22px; margin-bottom: 4px; }
+h1 span { color: #10b981; }
+.sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+#log { color: #f59e0b; font-size: 13px; margin-bottom: 12px; min-height: 20px; }
+#log.ok { color: #10b981; }
+#log.err { color: #ef4444; }
+video { width: 100%; max-width: 400px; border-radius: 10px; background: #111; display: block; margin: 0 auto 12px; }
+.btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
+button { padding: 10px 20px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: 0.3; cursor: default; }
+.green { background: #10b981; color: #fff; }
+.gray { background: #333; color: #ccc; }
+.red { background: #ef4444; color: #fff; }
+#result { font-size: 18px; font-weight: 700; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+#result.match { background: #052e16; color: #10b981; }
+#result.nomatch { background: #1c0a0a; color: #ef4444; }
+#result.idle { background: #111; color: #555; }
+.stats { display: flex; gap: 12px; justify-content: center; font-size: 13px; color: #888; }
+canvas { display: none; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>Face<span>X</span></h1>
-  <p>74 KB WASM. No server. Everything stays on your device.</p>
+<h1>Face<span>X</span> Demo</h1>
+<p class="sub">Face embedding in the browser. 44 KB WASM.</p>
+<div id="log">Loading...</div>
+
+<video id="vid" autoplay playsinline muted></video>
+
+<div class="btns">
+  <button id="bCam" class="green" disabled>Start Camera</button>
+  <button id="bRef" class="gray" disabled>Capture Reference</button>
+  <button id="bGo" class="green" disabled style="display:none">Start Verify</button>
+  <button id="bStop" class="red" style="display:none">Stop</button>
 </div>
 
-<div id="status" class="status loading">Checking browser support...</div>
-<div id="errorMsg" class="error-msg"></div>
-
-<div class="main">
-  <div class="video-wrap" id="videoWrap">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="overlay" class="overlay"></canvas>
-  </div>
-
-  <div class="controls">
-    <button id="btnStart" class="btn btn-go" disabled>Start Camera</button>
-    <button id="btnCapture" class="btn btn-sec" disabled>Set Reference</button>
-    <button id="btnVerify" class="btn btn-go" disabled style="display:none">Verify</button>
-    <button id="btnStop" class="btn btn-stop" style="display:none">Stop</button>
-  </div>
-
-  <div id="refBar" class="ref-bar" style="display:none">
-    <canvas id="refCanvas" width="112" height="112"></canvas>
-    <div><div class="label">Reference face</div></div>
-  </div>
-
-  <div id="resultBar" class="result-bar idle">Load engine to begin</div>
-
-  <div id="livenessBar" class="liveness-bar" style="display:none">
-    <div id="livenessDot" class="liveness-dot"></div>
-    <div id="livenessText" class="liveness-text">Checking liveness...</div>
-  </div>
-
-  <div id="statsGrid" class="stats" style="display:none">
-    <div class="stat"><div class="stat-val" id="vDet">—</div><div class="stat-label">Detect</div></div>
-    <div class="stat"><div class="stat-val" id="vEmb">—</div><div class="stat-label">Embed</div></div>
-    <div class="stat"><div class="stat-val" id="vSim">—</div><div class="stat-label">Match</div></div>
-    <div class="stat"><div class="stat-val" id="vFps">—</div><div class="stat-label">FPS</div></div>
-  </div>
-
-  <div class="info">
-    <h3>How it works</h3>
-    <p><code>detect.wasm</code> (29 KB) finds faces with RetinaFace INT8 + relaxed SIMD.</p>
-    <p><code>facex.wasm</code> (44 KB) computes 512-dim embeddings via EdgeFace-XS.</p>
-    <p>5-point alignment ensures accurate matching at any head angle.</p>
-    <p>Total: <code>74 KB</code> engine + <code>7.7 MB</code> weights (cached after first load).</p>
-  </div>
+<div id="result" class="idle"></div>
+<div class="stats" id="stats" style="display:none">
+  <span id="sEmb">—</span>
+  <span id="sSim">—</span>
+  <span id="sFps">—</span>
 </div>
 
-<script src="detect.js"></script>
+<canvas id="crop" width="112" height="112"></canvas>
+
 <script src="facex.js"></script>
-<script src="align.js"></script>
-<script src="liveness.js"></script>
 <script>
-const $ = id => document.getElementById(id);
-const video = $('video');
-const overlay = $('overlay');
-const ctx = overlay.getContext('2d');
-const refCanvas = $('refCanvas');
-const refCtx = refCanvas.getContext('2d', { willReadFrequently: true });
+const vid = document.getElementById('vid');
+const crop = document.getElementById('crop');
+const cropCtx = crop.getContext('2d', {willReadFrequently: true});
+const log = document.getElementById('log');
+const result = document.getElementById('result');
 
-let DetMod, FxMod, detH, fxH;
-let refEmb = null, running = false;
-const liveness = new LivenessDetector();
+let FxMod, fxH, refEmb = null, running = false;
 
-// Reusable canvases
-const srcCv = document.createElement('canvas');
-const srcCtx = srcCv.getContext('2d', { willReadFrequently: true });
-const cropCv = document.createElement('canvas');
-cropCv.width = 112; cropCv.height = 112;
-const cropCtxA = cropCv.getContext('2d', { willReadFrequently: true });
+function setLog(msg, cls) { log.textContent = msg; log.className = cls || ''; }
 
-// ===== SIMD Check =====
-function checkSimd() {
-  // Skip check — let WASM loading fail naturally with a better error.
-  // iPhone 16 Pro + Safari supports SIMD but some check modules give false negatives.
-  return typeof WebAssembly !== 'undefined';
-}
-
-// ===== IndexedDB Cache =====
-async function cachedFetch(url, key) {
-  try {
-    const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('facex-cache', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('w');
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    const cached = await new Promise(r => {
-      const tx = db.transaction('w','readonly');
-      const req = tx.objectStore('w').get(key);
-      req.onsuccess = () => r(req.result); req.onerror = () => r(null);
-    });
-    if (cached) return new Uint8Array(cached);
-    const buf = await fetch(url).then(r => r.arrayBuffer());
-    try { const tx = db.transaction('w','readwrite'); tx.objectStore('w').put(buf, key); } catch(e) {}
-    return new Uint8Array(buf);
-  } catch(e) { return new Uint8Array(await fetch(url).then(r => r.arrayBuffer())); }
-}
-
-// ===== Init =====
+// ===== Load embedding engine only (no detector — simple center crop) =====
 async function init() {
-  const s = $('status');
-  if (!checkSimd()) {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    showError(isIOS
-      ? 'WebAssembly SIMD not supported in this browser. On iOS, use Safari (not Chrome).'
-      : 'WebAssembly SIMD not supported. Use Chrome 91+, Firefox 89+, or Safari 16.4+.');
-    return;
-  }
   try {
-    s.textContent = '1/5 Loading face detector (29 KB)...'; s.className = 'status loading';
-    DetMod = await FaceDetModule();
-
-    s.textContent = '2/5 Loading face embedder (44 KB)...';
+    setLog('Loading FaceX engine (44 KB)...');
     FxMod = await FaceXModule();
 
-    s.textContent = '3/5 Downloading detector weights (670 KB)...';
-    const dw = await cachedFetch('det_500m_int8.bin', 'det');
+    setLog('Downloading model (7 MB, cached after first load)...');
+    const data = await loadCached('edgeface_xs_fp32.bin', 'facex_emb_v1');
+    FxMod.FS.writeFile('/w.bin', data);
 
-    s.textContent = '4/5 Downloading embedding weights (7 MB, cached after first load)...';
-    const fw = await cachedFetch('edgeface_xs_fp32.bin', 'emb');
+    setLog('Initializing...');
+    fxH = FxMod.cwrap('facex_init', 'number', ['string', 'string'])('/w.bin', null);
+    if (!fxH) throw new Error('Init failed');
 
-    s.textContent = '5/5 Initializing engines...';
-    DetMod.FS.writeFile('/d.bin', dw); FxMod.FS.writeFile('/e.bin', fw);
-
-    detH = DetMod.cwrap('detect_init','number',['string'])('/d.bin');
-    if (!detH) throw new Error('Face detector init failed — weights may be corrupted');
-
-    fxH = FxMod.cwrap('facex_init','number',['string','string'])('/e.bin', null);
-    if (!fxH) throw new Error('Face embedder init failed — weights may be corrupted');
-
-    s.textContent = 'Ready — engines loaded (detect 29KB + embed 44KB = 73KB WASM)'; s.className = 'status ready';
-    $('btnStart').disabled = false;
-    $('resultBar').textContent = 'Click "Start Camera" to begin';
+    setLog('Ready', 'ok');
+    document.getElementById('bCam').disabled = false;
   } catch(e) {
-    showError('Load failed: ' + e.message + '. Try refreshing the page.');
+    setLog('Error: ' + e.message, 'err');
   }
 }
 
-function showError(msg) {
-  $('status').textContent = 'Error'; $('status').className = 'status error';
-  $('errorMsg').textContent = msg; $('errorMsg').style.display = 'block';
+// ===== IndexedDB cache =====
+async function loadCached(url, key) {
+  try {
+    const db = await new Promise((r, j) => {
+      const q = indexedDB.open('facex', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('w');
+      q.onsuccess = () => r(q.result);
+      q.onerror = () => j(q.error);
+    });
+    const cached = await new Promise(r => {
+      const tx = db.transaction('w', 'readonly');
+      const req = tx.objectStore('w').get(key);
+      req.onsuccess = () => r(req.result);
+      req.onerror = () => r(null);
+    });
+    if (cached) { setLog('Loaded from cache', 'ok'); return new Uint8Array(cached); }
+    const buf = await fetch(url).then(r => r.arrayBuffer());
+    try { db.transaction('w','readwrite').objectStore('w').put(buf, key); } catch(e) {}
+    return new Uint8Array(buf);
+  } catch(e) {
+    return new Uint8Array(await fetch(url).then(r => r.arrayBuffer()));
+  }
 }
 
 // ===== Camera =====
-$('btnStart').onclick = async () => {
+document.getElementById('bCam').onclick = async () => {
   try {
-    $('btnStart').textContent = 'Starting camera...';
-    $('btnStart').disabled = true;
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' }});
-    video.srcObject = stream;
-    // Wait for video to actually start playing with real frames
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => {
-        overlay.width = video.videoWidth;
-        overlay.height = video.videoHeight;
-        video.play().then(resolve).catch(resolve);
-      };
+    document.getElementById('bCam').textContent = 'Starting...';
+    document.getElementById('bCam').disabled = true;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: {ideal: 320}, height: {ideal: 240} }
     });
-    // Wait for video to be ready (with 3s timeout)
-    await new Promise((resolve) => {
-      const start = Date.now();
-      const check = () => {
-        if (Date.now() - start > 3000) { resolve(); return; }
-        if (video.readyState >= 2 && video.videoWidth > 0) { resolve(); return; }
-        requestAnimationFrame(check);
-      };
-      check();
-    });
-    $('btnStart').style.display = 'none';
-    $('btnCapture').disabled = false;
-    $('resultBar').textContent = 'Look at camera and click "Set Reference"';
-  } catch(e) { showError('Camera access denied: ' + e.message); }
+    vid.srcObject = stream;
+    await vid.play();
+    // Wait up to 2s for valid dimensions
+    for (let i = 0; i < 40; i++) {
+      if (vid.videoWidth > 0) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    document.getElementById('bCam').style.display = 'none';
+    document.getElementById('bRef').disabled = false;
+    result.textContent = 'Camera ready. Look at camera and click "Capture Reference".';
+    result.className = 'idle';
+  } catch(e) {
+    setLog('Camera error: ' + e.message, 'err');
+    document.getElementById('bCam').disabled = false;
+    document.getElementById('bCam').textContent = 'Start Camera';
+  }
 };
 
-// ===== Detect: use native FaceDetector API if available (fast on mobile) =====
-let useNativeDetector = false;
-let nativeDetector = null;
-try {
-  if (typeof FaceDetector !== 'undefined') {
-    nativeDetector = new FaceDetector({ maxDetectedFaces: 5, fastMode: true });
-    useNativeDetector = true;
-  }
-} catch(e) {}
-
-async function runDetectNative() {
-  const W = video.videoWidth, H = video.videoHeight;
-  const t0 = performance.now();
-  const detected = await nativeDetector.detect(video);
-  const detMs = performance.now() - t0;
-  const faces = detected.map(d => {
-    const b = d.boundingBox;
-    // Native API gives landmarks in different order, approximate 5-point
-    const cx = b.x + b.width/2, cy = b.y + b.height/2;
-    const ew = b.width * 0.3, eh = b.height * 0.15;
-    return {
-      x1: b.x, y1: b.y, x2: b.x + b.width, y2: b.y + b.height,
-      score: 1.0,
-      kps: [
-        cx - ew, cy - eh,  // left eye
-        cx + ew, cy - eh,  // right eye
-        cx, cy + eh*0.5,   // nose
-        cx - ew*0.7, cy + b.height*0.3,  // left mouth
-        cx + ew*0.7, cy + b.height*0.3   // right mouth
-      ]
-    };
-  });
-  return { faces, detMs };
+// ===== Crop face from center of video =====
+function cropFace() {
+  const W = vid.videoWidth, H = vid.videoHeight;
+  if (!W || !H) return null;
+  // Take center square, 60% of shorter dimension
+  const sz = Math.min(W, H) * 0.6;
+  const sx = (W - sz) / 2, sy = (H - sz) / 2;
+  cropCtx.drawImage(vid, sx, sy, sz, sz, 0, 0, 112, 112);
+  return cropCtx.getImageData(0, 0, 112, 112);
 }
 
-function runDetect(size) {
-  const W = video.videoWidth, H = video.videoHeight;
-  const ds = size || 160;
-  const detCv = document.createElement('canvas'); detCv.width = ds; detCv.height = ds;
-  const dCtx = detCv.getContext('2d', { willReadFrequently: true });
-  const scale = Math.min(ds/W, ds/H);
-  const nw = Math.round(W*scale), nh = Math.round(H*scale);
-  const dx = (ds-nw)/2, dy = (ds-nh)/2;
-  dCtx.fillStyle = '#000'; dCtx.fillRect(0,0,ds,ds);
-  dCtx.drawImage(video, dx, dy, nw, nh);
-  const img = dCtx.getImageData(0,0,ds,ds);
-
-  const nPx = ds*ds*3;
-  const inP = DetMod._malloc(nPx*4);
-  const heap = DetMod.HEAPF32;
-  const b = inP>>2;
-  for (let i=0; i<ds*ds; i++) {
-    heap[b+i*3] = img.data[i*4]/127.5-1; heap[b+i*3+1] = img.data[i*4+1]/127.5-1; heap[b+i*3+2] = img.data[i*4+2]/127.5-1;
-  }
-  const outP = DetMod._malloc(15*4*10);
-  const df = DetMod.cwrap('detect_faces','number',['number','number','number','number','number','number']);
-  const t0 = performance.now();
-  const n = df(detH, inP, ds, ds, outP, 10);
-  const detMs = performance.now() - t0;
-
-  const faces = [];
-  for (let i=0; i<n; i++) {
-    const fb = (outP>>2)+i*15;
-    const f = DetMod.HEAPF32;
-    faces.push({
-      x1:(f[fb]-dx)/scale, y1:(f[fb+1]-dy)/scale, x2:(f[fb+2]-dx)/scale, y2:(f[fb+3]-dy)/scale,
-      score:f[fb+4], kps: Array.from({length:10}, (_,j) => (f[fb+5+j]-(j%2===0?dx:dy))/scale)
-    });
-  }
-  DetMod._free(inP); DetMod._free(outP);
-  return { faces, detMs };
-}
-
-// ===== Embed =====
-function runEmbed(imgData) {
-  const N=112*112*3;
-  const inP = FxMod._malloc(N*4), outP = FxMod._malloc(512*4);
-  const heap = FxMod.HEAPF32, b = inP>>2;
-  for (let i=0; i<112*112; i++) {
-    heap[b+i*3] = imgData.data[i*4]/127.5-1; heap[b+i*3+1] = imgData.data[i*4+1]/127.5-1; heap[b+i*3+2] = imgData.data[i*4+2]/127.5-1;
+// ===== Compute embedding =====
+function embed(imgData) {
+  const N = 112 * 112 * 3;
+  const inP = FxMod._malloc(N * 4);
+  const outP = FxMod._malloc(512 * 4);
+  const h = FxMod.HEAPF32;
+  const b = inP >> 2;
+  const px = imgData.data;
+  for (let i = 0; i < 112*112; i++) {
+    h[b+i*3]   = px[i*4]   / 127.5 - 1;
+    h[b+i*3+1] = px[i*4+1] / 127.5 - 1;
+    h[b+i*3+2] = px[i*4+2] / 127.5 - 1;
   }
   const t0 = performance.now();
   FxMod.cwrap('facex_embed','number',['number','number','number'])(fxH, inP, outP);
-  const embMs = performance.now() - t0;
+  const ms = performance.now() - t0;
   const emb = new Float32Array(512);
-  emb.set(heap.subarray(outP>>2, (outP>>2)+512));
-  FxMod._free(inP); FxMod._free(outP);
-  return { emb, embMs };
+  emb.set(h.subarray(outP>>2, (outP>>2)+512));
+  FxMod._free(inP);
+  FxMod._free(outP);
+  return { emb, ms };
 }
 
-function cosSim(a,b) {
-  let d=0,na=0,nb=0;
-  for (let i=0;i<512;i++) { d+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-  return d/Math.sqrt(na*nb);
+function cosSim(a, b) {
+  let d=0, na=0, nb=0;
+  for (let i=0; i<512; i++) { d+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+  return d / Math.sqrt(na * nb);
 }
 
-// ===== Align + Crop =====
-function alignAndCrop(face) {
-  const W = video.videoWidth, H = video.videoHeight;
-  srcCv.width = W; srcCv.height = H;
-  srcCtx.drawImage(video, 0, 0);
-  const kps5 = [];
-  for (let i=0; i<5; i++) kps5.push([face.kps[i*2], face.kps[i*2+1]]);
-  return alignFace(srcCtx, W, H, kps5, cropCtxA);
-}
-
-// ===== Draw =====
-function drawFaces(faces, isMatch) {
-  ctx.clearRect(0,0,overlay.width,overlay.height);
-  for (const f of faces) {
-    ctx.strokeStyle = isMatch === undefined ? '#10b981' : (isMatch ? '#10b981' : '#ef4444');
-    ctx.lineWidth = 2;
-    ctx.strokeRect(f.x1, f.y1, f.x2-f.x1, f.y2-f.y1);
-    ctx.fillStyle = ctx.strokeStyle;
-    for (let j=0; j<5; j++) { ctx.beginPath(); ctx.arc(f.kps[j*2], f.kps[j*2+1], 2, 0, Math.PI*2); ctx.fill(); }
-  }
-}
-
-// ===== Capture Reference =====
-$('btnCapture').onclick = () => {
-  $('btnCapture').disabled = true;
-  $('btnCapture').textContent = 'Detecting...';
-  $('resultBar').textContent = 'Looking for face...';
-  $('resultBar').className = 'result-bar idle';
-  // Defer to let UI update before heavy WASM call
-  setTimeout(() => { doCapture(); }, 50);
-};
-async function doCapture() {
-  if (useNativeDetector) {
-    // Native FaceDetector API — instant on mobile
-    $('resultBar').textContent = 'Detecting face (native)...';
-    const { faces, detMs } = await runDetectNative();
-    finishCapture(faces, detMs);
-    return;
-  }
-  // Mobile fallback: center crop (WASM detector too heavy for mobile)
-  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  if (isMobile) {
-    $('resultBar').textContent = 'Capturing face (center crop)...';
-    setTimeout(() => {
-      const W = video.videoWidth, H = video.videoHeight;
-      const sz = Math.min(W, H) * 0.7;
-      const cx = W/2, cy = H/2;
-      const face = {
-        x1: cx-sz/2, y1: cy-sz/2, x2: cx+sz/2, y2: cy+sz/2, score: 1.0,
-        kps: [cx-sz*0.15, cy-sz*0.1, cx+sz*0.15, cy-sz*0.1, cx, cy+sz*0.05,
-              cx-sz*0.12, cy+sz*0.2, cx+sz*0.12, cy+sz*0.2]
-      };
-      finishCapture([face], 0);
-    }, 50);
-    return;
-  }
-  // Desktop: WASM detector
-  $('resultBar').textContent = 'Detecting face...';
+// ===== Capture reference =====
+document.getElementById('bRef').onclick = () => {
+  const img = cropFace();
+  if (!img) { result.textContent = 'Camera not ready'; return; }
+  result.textContent = 'Computing embedding...';
   setTimeout(() => {
-    const { faces, detMs } = runDetect(160);
-    finishCapture(faces, detMs);
-  }, 50);
-}
-function finishCapture(faces, detMs) {
-  $('btnCapture').disabled = false;
-  $('btnCapture').textContent = 'Set Reference';
-  if (!faces.length) {
-    $('resultBar').textContent = 'No face detected (' + detMs.toFixed(0) + 'ms). Move closer, ensure good lighting.';
-    $('resultBar').className = 'result-bar nomatch';
-    return;
-  }
-  $('resultBar').textContent = 'Face found! Computing embedding...';
-  setTimeout(() => {
-    const aligned = alignAndCrop(faces[0]);
-    refCtx.putImageData(aligned, 0, 0);
-    const { emb, embMs } = runEmbed(aligned);
+    const { emb, ms } = embed(img);
     refEmb = emb;
-    $('refBar').style.display = 'flex';
-    $('btnVerify').style.display = 'inline-block'; $('btnVerify').disabled = false;
-    $('resultBar').textContent = 'Reference set (detect ' + detMs.toFixed(0) + 'ms + embed ' + embMs.toFixed(0) + 'ms). Click "Verify".';
-    $('resultBar').className = 'result-bar idle';
-    drawFaces(faces);
-    liveness.reset();
-  }, 50);
-}
+    result.textContent = 'Reference captured (' + ms.toFixed(0) + 'ms). Click "Start Verify".';
+    result.className = 'idle';
+    document.getElementById('bGo').style.display = 'inline-block';
+    document.getElementById('bGo').disabled = false;
+  }, 30);
+};
 
-// ===== Verify Loop =====
-$('btnVerify').onclick = () => {
+// ===== Verify loop =====
+document.getElementById('bGo').onclick = () => {
   running = true;
-  $('btnVerify').style.display = 'none'; $('btnStop').style.display = 'inline-block';
-  $('btnCapture').disabled = true;
-  $('statsGrid').style.display = 'grid'; $('livenessBar').style.display = 'flex';
+  document.getElementById('bGo').style.display = 'none';
+  document.getElementById('bStop').style.display = 'inline-block';
+  document.getElementById('bRef').disabled = true;
+  document.getElementById('stats').style.display = 'flex';
   loop();
 };
-$('btnStop').onclick = () => {
+document.getElementById('bStop').onclick = () => {
   running = false;
-  $('btnStop').style.display = 'none'; $('btnVerify').style.display = 'inline-block'; $('btnVerify').disabled = false;
-  $('btnCapture').disabled = false;
-  ctx.clearRect(0,0,overlay.width,overlay.height);
-  $('videoWrap').className = 'video-wrap';
+  document.getElementById('bStop').style.display = 'none';
+  document.getElementById('bGo').style.display = 'inline-block';
+  document.getElementById('bGo').disabled = false;
+  document.getElementById('bRef').disabled = false;
 };
 
-async function loop() {
+function loop() {
   if (!running) return;
-  const tAll = performance.now();
-  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  let faces, detMs;
-  if (useNativeDetector) {
-    ({ faces, detMs } = await runDetectNative());
-  } else if (isMobile) {
-    const W = video.videoWidth, H = video.videoHeight;
-    const sz = Math.min(W, H) * 0.7, cx = W/2, cy = H/2;
-    faces = [{ x1:cx-sz/2, y1:cy-sz/2, x2:cx+sz/2, y2:cy+sz/2, score:1,
-      kps:[cx-sz*.15,cy-sz*.1, cx+sz*.15,cy-sz*.1, cx,cy+sz*.05, cx-sz*.12,cy+sz*.2, cx+sz*.12,cy+sz*.2] }];
-    detMs = 0;
-  } else {
-    ({ faces, detMs } = runDetect(160));
-  }
-
-  if (!faces.length) {
-    drawFaces([]);
-    $('resultBar').textContent = 'No face detected'; $('resultBar').className = 'result-bar idle';
-    $('videoWrap').className = 'video-wrap';
-    $('vDet').textContent = detMs.toFixed(0)+'ms';
-    liveness.update(null);
-    requestAnimationFrame(loop); return;
-  }
-
-  const aligned = alignAndCrop(faces[0]);
-  const { emb, embMs } = runEmbed(aligned);
+  const img = cropFace();
+  if (!img) { requestAnimationFrame(loop); return; }
+  const t0 = performance.now();
+  const { emb, ms } = embed(img);
   const sim = cosSim(refEmb, emb);
+  const total = performance.now() - t0;
   const match = sim > 0.3;
-  const totalMs = performance.now() - tAll;
 
-  // Liveness
-  const live = liveness.update(faces[0]);
-  $('livenessDot').className = 'liveness-dot' + (live.alive ? ' live' : '');
-  $('livenessText').textContent = live.reason;
+  result.textContent = match
+    ? 'MATCH — ' + (sim*100).toFixed(1) + '%'
+    : 'NO MATCH — ' + (sim*100).toFixed(1) + '%';
+  result.className = match ? 'match' : 'nomatch';
 
-  drawFaces(faces, match);
-  $('resultBar').textContent = match ? `MATCH — ${(sim*100).toFixed(1)}%` : `NO MATCH — ${(sim*100).toFixed(1)}%`;
-  $('resultBar').className = 'result-bar ' + (match ? 'match' : 'nomatch');
-  $('videoWrap').className = 'video-wrap ' + (match ? 'match' : 'nomatch');
-  $('vDet').textContent = detMs.toFixed(0)+'ms';
-  $('vEmb').textContent = embMs.toFixed(0)+'ms';
-  $('vSim').textContent = (sim*100).toFixed(1)+'%';
-  $('vFps').textContent = (1000/totalMs).toFixed(0);
+  document.getElementById('sEmb').textContent = 'Embed: ' + ms.toFixed(0) + 'ms';
+  document.getElementById('sSim').textContent = 'Sim: ' + (sim*100).toFixed(1) + '%';
+  document.getElementById('sFps').textContent = 'FPS: ' + (1000/total).toFixed(0);
 
   requestAnimationFrame(loop);
 }
