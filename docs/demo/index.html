@@ -342,12 +342,12 @@ $('btnCapture').onclick = () => {
   setTimeout(() => { doCapture(); }, 50);
 };
 function doCapture() {
-  // Try 160 first (fast), fall back to 320 if no face found
-  let { faces, detMs } = runDetect(160);
+  // Try 96 first (fast on mobile), fall back to 160 if no face
+  let { faces, detMs } = runDetect(96);
   if (!faces.length) {
     $('resultBar').textContent = 'Retrying at higher resolution...';
-    const r2 = runDetect(320);
-    faces = r2.faces; detMs = r2.detMs;
+    const r2 = runDetect(160);
+    faces = r2.faces; detMs += r2.detMs;
   }
   $('btnCapture').disabled = false;
   $('btnCapture').textContent = 'Set Reference';
