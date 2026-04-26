@@ -6,7 +6,6 @@
 
 <p align="center">
 
-[![Live Demo](https://img.shields.io/badge/demo-try_it_now-10b981.svg)](https://facex-engine.github.io/facex/demo/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![LFW](https://img.shields.io/badge/LFW-99.73%25-success.svg)](#benchmarks)
 [![Latency](https://img.shields.io/badge/latency-3.0_ms-brightgreen.svg)](#benchmarks)
@@ -18,7 +17,7 @@
 
 **Add face recognition to any app in minutes.** Runs in the browser (74 KB WebAssembly) or on your server (3ms native C). Detects faces, aligns them, computes embeddings, compares. No server required for browser mode — photos never leave the user's device.
 
-**[Try the live demo →](https://facex-engine.github.io/facex/demo/)**
+<!-- Live demo coming soon -->
 
 ```html
 <!-- Browser: face verification in 3 lines -->
