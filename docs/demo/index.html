@@ -215,7 +215,7 @@ $('btnStart').onclick = async () => {
 // ===== Detect =====
 function runDetect() {
   const W = video.videoWidth, H = video.videoHeight;
-  const ds = 160;
+  const ds = 320;
   const detCv = document.createElement('canvas'); detCv.width = ds; detCv.height = ds;
   const dCtx = detCv.getContext('2d', { willReadFrequently: true });
   const scale = Math.min(ds/W, ds/H);
