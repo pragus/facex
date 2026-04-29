@@ -6,6 +6,16 @@
 *.dll
 *.so
 *.dylib
+.bench-old/
+.idea/
+facex-cli
+facex-cli.exe
+facex-example
+facex-encrypt
+facex-bench-detect
+bench-detect
+golden-test
+golden-test.exe
 
 # Local toolchains and datasets — NOT committed
 emsdk/
