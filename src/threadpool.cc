@@ -17,8 +17,19 @@
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
+#if defined(__linux__)
 #include <linux/futex.h>
 #include <sys/syscall.h>
+#define TP_USE_FUTEX 1
+#else
+/* macOS, *BSD: no futex — fall back to pthread mutex + condvar. */
+#define TP_USE_PTHREAD_COND 1
+#endif
+#endif
+
+#ifdef TP_USE_PTHREAD_COND
+static pthread_mutex_t g_phase_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_phase_cv = PTHREAD_COND_INITIALIZER;
 #endif
 
 /* Atomic operations */
@@ -99,8 +110,15 @@ worker_fn(void* arg) {
                 /* Sleep until woken */
                 #ifdef _WIN32
                 WaitOnAddress((volatile void*)&g_task.phase, &last_phase, sizeof(int), INFINITE);
-                #else
+                #elif defined(TP_USE_FUTEX)
                 syscall(SYS_futex, &g_task.phase, FUTEX_WAIT, last_phase, NULL, NULL, 0);
+                #else
+                pthread_mutex_lock(&g_phase_mu);
+                while (ATOMIC_LOAD(&g_task.phase) == last_phase &&
+                       !ATOMIC_LOAD(&g_shutdown)) {
+                    pthread_cond_wait(&g_phase_cv, &g_phase_mu);
+                }
+                pthread_mutex_unlock(&g_phase_mu);
                 #endif
                 continue;
             }
@@ -178,11 +196,18 @@ void tp_parallel_for(tp_task_fn fn, void* ctx, int total, int grain) {
     g_task.n_workers = n_workers;
 
     /* Wake workers */
+    #ifdef TP_USE_PTHREAD_COND
+    pthread_mutex_lock(&g_phase_mu);
+    ATOMIC_ADD(&g_task.phase, 1);
+    pthread_cond_broadcast(&g_phase_cv);
+    pthread_mutex_unlock(&g_phase_mu);
+    #else
     ATOMIC_ADD(&g_task.phase, 1);
     #ifdef _WIN32
     WakeByAddressAll((void*)&g_task.phase);
     #else
     syscall(SYS_futex, &g_task.phase, FUTEX_WAKE, n_workers, NULL, NULL, 0);
+    #endif
     #endif
 
     /* Main thread participates too */
@@ -202,6 +227,14 @@ void tp_parallel_for(tp_task_fn fn, void* ctx, int total, int grain) {
 
 void tp_destroy(void) {
     ATOMIC_STORE(&g_shutdown, 1);
+    #ifdef TP_USE_PTHREAD_COND
+    pthread_mutex_lock(&g_phase_mu);
+    ATOMIC_ADD(&g_task.phase, 1);
+    pthread_cond_broadcast(&g_phase_cv);
+    pthread_mutex_unlock(&g_phase_mu);
+    for (int i = 0; i < g_n_threads - 1; i++)
+        pthread_join(g_workers[i].handle, NULL);
+    #else
     ATOMIC_ADD(&g_task.phase, 1);
     #ifdef _WIN32
     WakeByAddressAll((void*)&g_task.phase);
@@ -211,6 +244,7 @@ void tp_destroy(void) {
     syscall(SYS_futex, &g_task.phase, FUTEX_WAKE, MAX_THREADS, NULL, NULL, 0);
     for (int i = 0; i < g_n_threads - 1; i++)
         pthread_join(g_workers[i].handle, NULL);
+    #endif
     #endif
 }
 
