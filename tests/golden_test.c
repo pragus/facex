@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     printf("FaceX Golden Test\n");
     printf("Loading: %s\n", weights);
 
-    FaceX* fx = facex_init(weights, NULL);
+    FaceX* fx = facex_init(weights, NULL, NULL);
     if (!fx) {
         fprintf(stderr, "FAIL: cannot load weights\n");
         return 1;
@@ -52,9 +52,9 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 8; i++) printf("%.6f ", emb[i]);
     printf("\n");
 
-    /* Verify embedding is non-trivial (norm > 0.1) */
-    if (norm < 0.1f) {
-        fprintf(stderr, "FAIL: norm %.4f too small — likely garbage output\n", norm);
+    /* Verify embedding is L2-normalized */
+    if (fabsf(norm - 1.0f) > 1e-3f) {
+        fprintf(stderr, "FAIL: norm %.6f is not ~1.0\n", norm);
         return 1;
     }
     if (nan_count > 0) {

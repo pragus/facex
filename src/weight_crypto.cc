@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "../include/weight_crypto.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -188,7 +189,11 @@ static void get_machine_id(char* buf, int maxlen) {
     FILE* f;
     /* Hostname */
     f = fopen("/etc/hostname", "r");
-    if (f) { fgets(buf, maxlen, f); fclose(f); buf[strcspn(buf,"\n")] = 0; }
+    if (f) {
+        if (fgets(buf, maxlen, f) == NULL) buf[0] = 0;
+        fclose(f);
+        if (buf[0]) buf[strcspn(buf, "\n")] = 0;
+    }
     /* CPU ID from /proc/cpuinfo */
     f = fopen("/proc/cpuinfo", "r");
     if (f) {
@@ -234,8 +239,16 @@ int weight_encrypt_file(const char* input, const char* output, const char* licen
     size_t len = ftell(fin);
     fseek(fin, 0, SEEK_SET);
     uint8_t* data = (uint8_t*)malloc(len);
-    fread(data, 1, len, fin);
+    if (!data) {
+        fclose(fin);
+        return -1;
+    }
+    size_t read_len = fread(data, 1, len, fin);
     fclose(fin);
+    if (read_len != len) {
+        free(data);
+        return -1;
+    }
 
     /* Generate nonce from weight data hash (take first 16 bytes of SHA-256) */
     uint8_t nonce_hash[32];
@@ -302,7 +315,7 @@ int main(int argc, char** argv) {
         FILE* f = fopen(argv[2], "rb");
         if (!f) { fprintf(stderr, "Cannot open %s\n", argv[2]); return 1; }
         fseek(f, 0, SEEK_END); size_t sz = ftell(f); fseek(f, 0, SEEK_SET);
-        uint8_t* data = malloc(sz); fread(data, 1, sz, f); fclose(f);
+        uint8_t* data = (uint8_t*)malloc(sz); fread(data, 1, sz, f); fclose(f);
         int r = weight_decrypt_inplace(data, sz, argv[3]);
         if (r == 0) printf("OK: decryption successful, EFXS magic verified\n");
         else if (r == -2) printf("FAIL: wrong license key for this machine\n");

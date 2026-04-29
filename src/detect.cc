@@ -11,12 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#ifdef __AVX2__
-#include <immintrin.h>
-#ifdef __wasm_simd128__
-#include "../include/wasm_compat.h"
-#endif
-#endif
 
 #define DETECT_VERSION_STR "0.3.0-fp32"
 
@@ -157,7 +151,7 @@ static void conv1x1(const float* in, int Ci, int HW, const float* w, const float
         float* orow = out + (size_t)co * HW;
         for (int i = 0; i < HW; i++) orow[i] = bias;
     }
-    /* Accumulate: for each input channel, broadcast weight and FMA across all pixels.
+    /* Accumulate: for each input channel, broadcast weight and multiply-add across all pixels.
      * This is cache-friendly: sequential reads on both in[] and out[]. */
     for (int ci = 0; ci < Ci; ci++) {
         const float* in_ch = in + (size_t)ci * HW;
@@ -165,14 +159,6 @@ static void conv1x1(const float* in, int Ci, int HW, const float* w, const float
             float wt = w[(size_t)co * Ci + ci];
             float* orow = out + (size_t)co * HW;
             int i = 0;
-#ifdef __AVX2__
-            __m256 vw = _mm256_set1_ps(wt);
-            for (; i + 8 <= HW; i += 8) {
-                __m256 vi = _mm256_loadu_ps(in_ch + i);
-                __m256 vo = _mm256_loadu_ps(orow + i);
-                _mm256_storeu_ps(orow + i, _mm256_fmadd_ps(vw, vi, vo));
-            }
-#endif
             for (; i < HW; i++) orow[i] += wt * in_ch[i];
         }
     }

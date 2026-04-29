@@ -5,10 +5,10 @@
  * outputs 512-dim embedding. Zero dependencies.
  *
  * Architecture: 4 stages × ConvNeXt blocks + 3 SDPA attention + head.
- * All ops in FP32 with AVX2 MatMul.
+ * All ops in FP32 with portable MatMul.
  *
- * Build: gcc -O3 -march=native -mfma -o fastface_edgexs.exe \
- *   edgeface_engine.c kernels/transformer_ops.c kernels/gemm_int8_4x8c8.c -lm
+ * Build: gcc -O3 -o fastface_edgexs.exe \
+ *   edgeface_engine.c kernels/transformer_ops.c kernels/gemm_int8_4x8c8.cc -lm
  */
 
 #include <stdio.h>
@@ -17,28 +17,34 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
-#ifdef __AVX2__
-#include <immintrin.h>
-#ifdef __wasm_simd128__
-#include "../include/wasm_compat.h"
-#endif
-#endif
 
 /* Weight decryption (optional, linked from crypto/weight_crypto.c) */
 #ifndef NO_CRYPTO
+extern "C" {
 extern int weight_decrypt_inplace(uint8_t* raw, size_t raw_size, const char* license);
+}
 #endif
 
 /* External ops */
+extern "C" {
 extern void layer_norm_fp32(const float*, int, int, const float*, const float*, float, float*);
-#ifdef __AVX2__
-extern __m256 _mm256_exp_ps(__m256 x);
-#endif
 extern void gelu_fp32(float*, int);
 extern void softmax_fp32(float*, int, int);
 extern void matmul_fp32(const float*, const float*, float*, int, int, int);
 extern void l2_normalize_fp32(float*, int, int, float);
+extern void add_fp32(float*, const float*, int);
+extern void scale_fp32(float*, int, float);
+extern void bias_gamma_residual_fp32(const float*, float*, const float*, const float*, const float*, int, int);
 extern void depthwise_conv_nxn_hwc_fp32(const float*, int, int, int, const float*, const float*, int, float*);
+extern void matmul_fp32_packed(const float*, const float*, float*, int, int, int);
+extern void matmul_fp32_packed_bias(const float*, const float*, const float*, float*, int, int, int);
+extern void matmul_bias_gelu_packed(const float*, const float*, const float*, float*, int, int, int);
+extern void matmul_residual_bias_gamma_packed(const float*, const float*, const float*, const float*, const float*, float*, int, int, int);
+extern void pack_weights_4x8c8(const int8_t*, const float*, int, int, void*, int32_t*);
+extern int packed_weights_size_4x8c8(int, int);
+extern void pack_b_fp32(const float*, int, int, float*);
+extern int packed_b_fp32_size(int, int);
+}
 
 /* ============ Weight loader ============ */
 /* INT8 packed MatMul weight */
@@ -51,7 +57,7 @@ typedef struct {
 
 /* FP32 pre-packed MatMul weight (column-panel format for cache-friendly access) */
 typedef struct {
-    float* data;  /* packed [ceil(N/8), K, 8] — 32-byte aligned */
+    float* data;  /* packed [ceil(N/16), K, 16] */
     int K, N;
 } PackedFP32;
 
@@ -77,8 +83,18 @@ static int load_weights(const char* path, Weights* w) {
     fseek(f, 0, SEEK_SET);
 
     w->raw = (uint8_t*)malloc(w->raw_size);
-    fread(w->raw, 1, w->raw_size, f);
+    if (!w->raw) {
+        fclose(f);
+        return -1;
+    }
+
+    size_t read_sz = fread(w->raw, 1, w->raw_size, f);
     fclose(f);
+    if (read_sz != w->raw_size) {
+        free(w->raw);
+        w->raw = NULL;
+        return -1;
+    }
 
     /* Handle encrypted weights (EFXE magic) */
 #ifndef NO_CRYPTO
@@ -150,6 +166,11 @@ static void matmul_wp(const float* A, float* C,
                       int M, int K, int N, const PackedFP32* fp);
 static void matmul_wpb(const float* A, float* C, const float* bias,
                        int M, int K, int N, const PackedFP32* fp);
+static void matmul_wpbg(const float* A, float* C, const float* bias,
+                        int M, int K, int N, const PackedFP32* fp);
+static void matmul_wpbrg(const float* A, float* C, const float* bias,
+                         const float* gamma, const float* residual,
+                         int M, int K, int N, const PackedFP32* fp);
 
 /* ============ XCA (Cross-Covariance Attention) Block ============ */
 /* EdgeFace XCA: Split+DW conv → pos embed →
@@ -281,14 +302,7 @@ static void xca_block(float* x_hwc, int H, int W, int C,
     /* 2. Position embedding: add pre-computed constant (cached at load time) */
     if (pos_const_nchw) {
         /* pos_const_nchw now points to pre-computed [HW, C] HWC result */
-        int i = 0;
-#ifdef __AVX2__
-        for (; i + 8 <= HW * C; i += 8) {
-            __m256 v = _mm256_add_ps(_mm256_loadu_ps(x_hwc + i), _mm256_loadu_ps(pos_const_nchw + i));
-            _mm256_storeu_ps(x_hwc + i, v);
-        }
-#endif
-        for (; i < HW * C; i++) x_hwc[i] += pos_const_nchw[i];
+        add_fp32(x_hwc, pos_const_nchw, HW * C);
     }
 
     /* Save x_after_dw_pos as residual for attention */
@@ -302,11 +316,7 @@ static void xca_block(float* x_hwc, int H, int W, int C,
     float* qkv = t1;
     float* qkv_temp = t1 + HW * qkv_dim;
     matmul_wp(x_hwc, qkv_temp, HW, C, rank, fp_qkv0);
-    matmul_wp(qkv_temp, qkv, HW, rank, qkv_dim, fp_qkv1);
-    /* Add bias */
-    for (int hw = 0; hw < HW; hw++)
-        for (int d = 0; d < qkv_dim; d++)
-            qkv[hw * qkv_dim + d] += qkv_b[d];
+    matmul_wpb(qkv_temp, qkv, qkv_b, HW, rank, qkv_dim, fp_qkv1);
 
     /* 5. Reshape QKV: [HW, 3C] → [HW, 3, n_heads, head_dim] →
      *    transpose to [3, n_heads, head_dim, HW] → split Q,K,V */
@@ -330,44 +340,13 @@ static void xca_block(float* x_hwc, int H, int W, int C,
                 V_nhd[h * head_dim * HW + d * HW + hw] = qkv[qkv_idx];
             }
 
-    /* 6. L2 normalize Q and K along HW dim — AVX2 vectorized */
+    /* 6. L2 normalize Q and K along HW dim */
     for (int h = 0; h < n_heads; h++)
         for (int d = 0; d < head_dim; d++) {
             float* q_row = Q_nhd + h * head_dim * HW + d * HW;
             float* k_row = K_nhd + h * head_dim * HW + d * HW;
-            float q_norm = 0, k_norm = 0;
-            int hw = 0;
-#ifdef __AVX2__
-            __m256 vqn = _mm256_setzero_ps(), vkn = _mm256_setzero_ps();
-            for (; hw + 8 <= HW; hw += 8) {
-                __m256 q = _mm256_loadu_ps(q_row + hw);
-                __m256 k = _mm256_loadu_ps(k_row + hw);
-                vqn = _mm256_fmadd_ps(q, q, vqn);
-                vkn = _mm256_fmadd_ps(k, k, vkn);
-            }
-            /* Horizontal sum */
-            __m128 lo, hi;
-            lo = _mm256_castps256_ps128(vqn); hi = _mm256_extractf128_ps(vqn, 1);
-            lo = _mm_add_ps(lo, hi); lo = _mm_add_ps(lo, _mm_movehl_ps(lo, lo));
-            lo = _mm_add_ss(lo, _mm_movehdup_ps(lo));
-            q_norm = _mm_cvtss_f32(lo);
-            lo = _mm256_castps256_ps128(vkn); hi = _mm256_extractf128_ps(vkn, 1);
-            lo = _mm_add_ps(lo, hi); lo = _mm_add_ps(lo, _mm_movehl_ps(lo, lo));
-            lo = _mm_add_ss(lo, _mm_movehdup_ps(lo));
-            k_norm = _mm_cvtss_f32(lo);
-#endif
-            for (; hw < HW; hw++) { q_norm += q_row[hw]*q_row[hw]; k_norm += k_row[hw]*k_row[hw]; }
-            float q_inv = 1.0f / sqrtf(q_norm > 1e-24f ? q_norm : 1e-24f);
-            float k_inv = 1.0f / sqrtf(k_norm > 1e-24f ? k_norm : 1e-24f);
-            hw = 0;
-#ifdef __AVX2__
-            __m256 vqi = _mm256_set1_ps(q_inv), vki = _mm256_set1_ps(k_inv);
-            for (; hw + 8 <= HW; hw += 8) {
-                _mm256_storeu_ps(q_row + hw, _mm256_mul_ps(_mm256_loadu_ps(q_row + hw), vqi));
-                _mm256_storeu_ps(k_row + hw, _mm256_mul_ps(_mm256_loadu_ps(k_row + hw), vki));
-            }
-#endif
-            for (; hw < HW; hw++) { q_row[hw] *= q_inv; k_row[hw] *= k_inv; }
+            l2_normalize_fp32(q_row, 1, HW, 1e-12f);
+            l2_normalize_fp32(k_row, 1, HW, 1e-12f);
         }
 
     /* 7. Per-head channel attention using matmul_fp32 for Q@K^T and attn@V */
@@ -390,15 +369,7 @@ static void xca_block(float* x_hwc, int H, int W, int C,
         /* Scale by temperature */
         if (temperature) {
             float temp = temperature[h];
-#ifdef __AVX2__
-            __m256 vt = _mm256_set1_ps(temp);
-            int i = 0;
-            for (; i + 8 <= head_dim * head_dim; i += 8)
-                _mm256_storeu_ps(A_h + i, _mm256_mul_ps(_mm256_loadu_ps(A_h + i), vt));
-            for (; i < head_dim * head_dim; i++) A_h[i] *= temp;
-#else
-            for (int i = 0; i < head_dim * head_dim; i++) A_h[i] *= temp;
-#endif
+            scale_fp32(A_h, head_dim * head_dim, temp);
         }
 
         /* Softmax per row */
@@ -417,16 +388,18 @@ static void xca_block(float* x_hwc, int H, int W, int C,
                 x_hwc[hw * C + h * head_dim + d] = Q_nhd[h * head_dim * HW + d * HW + hw];
 
     /* 9. Output projection: LoRaLin [HW,C] → [HW,C] */
-    float* proj_temp = t1;
-    matmul_wp(x_hwc, proj_temp, HW, C, rank, fp_proj0);
-    matmul_wp(proj_temp, x_hwc, HW, rank, C, fp_proj1);
-    for (int i = 0; i < HW * C; i++)
-        x_hwc[i] += proj_b[i % C];
+    if (fp_proj0 && fp_proj0->data && fp_proj0->K == C && fp_proj0->N == C) {
+        float* proj_temp = t1;
+        matmul_wpb(x_hwc, proj_temp, proj_b, HW, C, C, fp_proj0);
+        memcpy(x_hwc, proj_temp, (size_t)HW * C * sizeof(float));
+    } else {
+        float* proj_temp = t1;
+        matmul_wp(x_hwc, proj_temp, HW, C, rank, fp_proj0);
+        matmul_wpb(proj_temp, x_hwc, proj_b, HW, rank, C, fp_proj1);
+    }
 
     /* 10. gamma_xca * output + residual_dw (attention residual = after DW+pos) */
-    for (int hw = 0; hw < HW; hw++)
-        for (int c = 0; c < C; c++)
-            x_hwc[hw*C+c] = x_hwc[hw*C+c] * gamma_xca[c] + residual_dw[hw*C+c];
+    bias_gamma_residual_fp32(x_hwc, x_hwc, NULL, gamma_xca, residual_dw, HW, C);
 
     /* 11. LN + MLP + gamma + residual_orig (MLP residual = original block input) */
     layer_norm_fp32(x_hwc, HW, C, ln_w, ln_b, 1e-6f, x_hwc);
@@ -434,21 +407,14 @@ static void xca_block(float* x_hwc, int H, int W, int C,
     float* mt1 = t1;
     float* mt2 = mt1 + HW * rank;
     matmul_wp(x_hwc, mt1, HW, C, rank, fp_mlp0);
-    matmul_wp(mt1, mt2, HW, rank, hidden, fp_mlp1);
-    for (int hw = 0; hw < HW; hw++)
-        for (int h_ = 0; h_ < hidden; h_++)
-            mt2[hw*hidden+h_] += mlp_b1[h_];
-    gelu_fp32(mt2, HW * hidden);
+    matmul_wpbg(mt1, mt2, mlp_b1, HW, rank, hidden, fp_mlp1);
     matmul_wp(mt2, mt1, HW, hidden, rank, fp_mlp2);
-    matmul_wp(mt1, x_hwc, HW, rank, C, fp_mlp3);
-    for (int hw = 0; hw < HW; hw++)
-        for (int c = 0; c < C; c++)
-            x_hwc[hw*C+c] = (x_hwc[hw*C+c] + mlp_b3[c]) * gamma[c] + residual_orig[hw*C+c];
+    matmul_wpbrg(mt1, x_hwc, mlp_b3, gamma, residual_orig, HW, rank, C, fp_mlp3);
 }
 
 /* ============ Conv2D FP32 (HWC in → HWC out) ============ */
 /* Standard conv with OIHW weights, operating on HWC tensors.
- * AVX2 optimized: vectorize across output channels (Cout). */
+ * portable: compute across output channels (Cout). */
 /* conv2d_hwc with pre-transposed weights in [Cin*KK, Cout] layout.
  * At load time, call conv2d_hwc_reorder_weights() to transpose OIHW → [Cin*KK, Cout]. */
 static void conv2d_hwc_reorder_weights(float* w, int Cout, int Cin, int KK) {
@@ -471,10 +437,6 @@ static void conv2d_hwc(const float* in_hwc, int Cin, int H, int W,
         for (int ox = 0; ox < Wo; ox++) {
             float* o = out_hwc + ((size_t)oy * Wo + ox) * Cout;
             int co = 0;
-#ifdef __AVX2__
-            for (; co + 8 <= Cout; co += 8)
-                _mm256_storeu_ps(o + co, b ? _mm256_loadu_ps(b + co) : _mm256_setzero_ps());
-#endif
             for (; co < Cout; co++) o[co] = b ? b[co] : 0;
             for (int ky = 0; ky < K; ky++)
                 for (int kx = 0; kx < K; kx++) {
@@ -486,22 +448,28 @@ static void conv2d_hwc(const float* in_hwc, int Cin, int H, int W,
                         /* Reordered w: w[(ci*KK+ki)*Cout + co] — CONTIGUOUS along Cout! */
                         const float* wrow = w + (size_t)(ci * KK + ki) * Cout;
                         co = 0;
-#ifdef __AVX512F__
-                        __m512 va512 = _mm512_set1_ps(in_val);
-                        for (; co + 16 <= Cout; co += 16)
-                            _mm512_storeu_ps(o+co, _mm512_fmadd_ps(va512,
-                                _mm512_loadu_ps(wrow+co), _mm512_loadu_ps(o+co)));
-#endif
-#ifdef __AVX2__
-                        __m256 va = _mm256_set1_ps(in_val);
-                        for (; co + 8 <= Cout; co += 8)
-                            _mm256_storeu_ps(o+co, _mm256_fmadd_ps(va,
-                                _mm256_loadu_ps(wrow+co), _mm256_loadu_ps(o+co)));
-#endif
                         for (; co < Cout; co++) o[co] += in_val * wrow[co];
                     }
                 }
         }
+}
+
+static void conv2d_hwc_packed(const float* in_hwc, int Cin, int H, int W,
+                              const float* bias, int Cout, int K, int stride,
+                              const PackedFP32* fp, float* im2col,
+                              float* out_hwc) {
+    int Ho = (H - K) / stride + 1, Wo = (W - K) / stride + 1;
+    int row_k = Cin * K * K;
+    for (int oy = 0; oy < Ho; oy++)
+        for (int ox = 0; ox < Wo; ox++) {
+            float* row = im2col + ((size_t)oy * Wo + ox) * row_k;
+            int p = 0;
+            for (int ci = 0; ci < Cin; ci++)
+                for (int ky = 0; ky < K; ky++)
+                    for (int kx = 0; kx < K; kx++)
+                        row[p++] = in_hwc[((size_t)(oy * stride + ky) * W + ox * stride + kx) * Cin + ci];
+        }
+    matmul_fp32_packed_bias(im2col, fp->data, bias, out_hwc, Ho * Wo, row_k, Cout);
 }
 
 /* ============ Conv2D FP32 (NCHW) ============ */
@@ -532,9 +500,6 @@ static void matmul_auto(const float* A, int M, int K, int N,
     /* Actually this doesn't work — we need output pointer. Rethink. */
 }
 
-/* Use matmul that checks for pre-packed FP32 or INT8 weights */
-extern void matmul_fp32_packed(const float*, const float*, float*, int, int, int);
-
 static void matmul_w(const float* A, const float* B, float* C,
                      int M, int K, int N, const PackedMM* mm)
 {
@@ -546,7 +511,6 @@ static void matmul_w(const float* A, const float* B, float* C,
 
 /* Packed FP32 matmul — uses pre-packed weights for cache-friendly access.
  * Optional bias: added to each output row during store (avoids separate pass). */
-extern void matmul_fp32_packed_bias(const float*, const float*, const float*, float*, int, int, int);
 
 extern void matmul_specialized(const float*, const float*, float*, int, int, int);
 extern void matmul_jit_or_packed(const float*, const float*, float*, int, int, int);
@@ -564,6 +528,78 @@ static void matmul_wpb(const float* A, float* C, const float* bias,
 {
     if (fp && fp->data)
         matmul_fp32_packed_bias(A, fp->data, bias, C, M, K, N);
+}
+
+static void matmul_wpbg(const float* A, float* C, const float* bias,
+                        int M, int K, int N, const PackedFP32* fp)
+{
+    if (fp && fp->data)
+        matmul_bias_gelu_packed(A, fp->data, bias, C, M, K, N);
+}
+
+static void matmul_wpbrg(const float* A, float* C, const float* bias,
+                         const float* gamma, const float* residual,
+                         int M, int K, int N, const PackedFP32* fp)
+{
+    if (fp && fp->data)
+        matmul_residual_bias_gamma_packed(A, fp->data, bias, gamma, residual, C, M, K, N);
+}
+
+template <int Channels>
+static inline void hwc_mean(const float* in, int HW, float* out) {
+    for (int c = 0; c < Channels; c++) {
+        float sum = 0.0f;
+        for (int hw = 0; hw < HW; hw++) sum += in[(size_t)hw * Channels + c];
+        out[c] = sum / HW;
+    }
+}
+
+static void pack_transposed_fc_weight(const float* wt_nk, int K, int N,
+                                      PackedFP32* fp) {
+    float* wt_kn = (float*)malloc((size_t)K * N * sizeof(float));
+    for (int n = 0; n < N; n++)
+        for (int k = 0; k < K; k++)
+            wt_kn[(size_t)k * N + n] = wt_nk[(size_t)n * K + k];
+
+    int sz = packed_b_fp32_size(K, N);
+    float* packed;
+#ifdef _WIN32
+    packed = (float*)_aligned_malloc((size_t)sz * sizeof(float), 64);
+#else
+    if (posix_memalign((void**)&packed, 64, (size_t)sz * sizeof(float)) != 0) packed = NULL;
+#endif
+    if (!packed) packed = (float*)malloc((size_t)sz * sizeof(float));
+    pack_b_fp32(wt_kn, K, N, packed);
+    fp->data = packed;
+    fp->K = K;
+    fp->N = N;
+    free(wt_kn);
+}
+
+static void pack_folded_projection_weight(const float* w0, const float* w1,
+                                          int C, int rank, PackedFP32* fp) {
+    float* folded = (float*)calloc((size_t)C * C, sizeof(float));
+    for (int k = 0; k < C; k++)
+        for (int r = 0; r < rank; r++) {
+            const float a = w0[(size_t)k * rank + r];
+            const float* w1_row = w1 + (size_t)r * C;
+            float* out = folded + (size_t)k * C;
+            for (int n = 0; n < C; n++) out[n] += a * w1_row[n];
+        }
+
+    int sz = packed_b_fp32_size(C, C);
+    float* packed;
+#ifdef _WIN32
+    packed = (float*)_aligned_malloc((size_t)sz * sizeof(float), 64);
+#else
+    if (posix_memalign((void**)&packed, 64, (size_t)sz * sizeof(float)) != 0) packed = NULL;
+#endif
+    if (!packed) packed = (float*)malloc((size_t)sz * sizeof(float));
+    pack_b_fp32(folded, C, C, packed);
+    fp->data = packed;
+    fp->K = C;
+    fp->N = C;
+    free(folded);
 }
 
 /* ============ Threaded MLP worker (file scope for proper compilation) ============ */
@@ -584,12 +620,7 @@ static void _mlp_rows(void* ctx_, int start, int end) {
     float* t2_s = g->t2 + start * g->hidden;
     float* res_s = g->residual + start * g->C;
     matmul_fp32_packed(x_s, g->fp0->data, t1_s, rows, g->fp0->K, g->fp0->N);
-    matmul_fp32_packed(t1_s, g->fp1->data, t2_s, rows, g->fp1->K, g->fp1->N);
-    for (int r = 0; r < rows; r++) {
-        float* row = t2_s + r * g->hidden;
-        for (int h = 0; h < g->hidden; h++) row[h] += g->mlp_b1[h];
-    }
-    gelu_fp32(t2_s, rows * g->hidden);
+    matmul_bias_gelu_packed(t1_s, g->fp1->data, g->mlp_b1, t2_s, rows, g->fp1->K, g->fp1->N);
     matmul_fp32_packed(t2_s, g->fp2->data, t1_s, rows, g->fp2->K, g->fp2->N);
     matmul_fp32_packed(t1_s, g->fp3->data, x_s, rows, g->fp3->K, g->fp3->N);
     for (int r = 0; r < rows; r++)
@@ -630,45 +661,9 @@ static void convnext_block(float* x_hwc, int H, int W, int C,
     {
         /* Single-threaded MLP operating on dw_out */
         matmul_wp(dw_out, t1, HW, C, rank, fp0);
-        matmul_wp(t1, t2, HW, rank, hidden, fp1);
-        /* Bias + GELU */
-        for (int hw = 0; hw < HW; hw++) {
-            float* row = t2 + hw * hidden;
-            int h = 0;
-#ifdef __AVX512F__
-            for (; h + 16 <= hidden; h += 16)
-                _mm512_storeu_ps(row+h, _mm512_add_ps(_mm512_loadu_ps(row+h), _mm512_loadu_ps(mlp_b1+h)));
-#elif defined(__AVX2__)
-            for (; h + 8 <= hidden; h += 8)
-                _mm256_storeu_ps(row+h, _mm256_add_ps(_mm256_loadu_ps(row+h), _mm256_loadu_ps(mlp_b1+h)));
-#endif
-            for (; h < hidden; h++) row[h] += mlp_b1[h];
-        }
-        gelu_fp32(t2, HW * hidden);
+        matmul_wpbg(t1, t2, mlp_b1, HW, rank, hidden, fp1);
         matmul_wp(t2, t1, HW, hidden, rank, fp2);
-        matmul_wp(t1, dw_out, HW, rank, C, fp3); /* → dw_out, not x_hwc */
-        /* Fused bias + gamma + residual with AVX-512 */
-        for (int hw = 0; hw < HW; hw++) {
-            int c = 0;
-#ifdef __AVX512F__
-            for (; c + 16 <= C; c += 16) {
-                __m512 v = _mm512_loadu_ps(dw_out + hw*C + c);
-                v = _mm512_add_ps(v, _mm512_loadu_ps(mlp_b3 + c));
-                v = _mm512_fmadd_ps(v, _mm512_loadu_ps(gamma + c), _mm512_loadu_ps(residual + hw*C + c));
-                _mm512_storeu_ps(x_hwc + hw*C + c, v);
-            }
-#endif
-#ifdef __AVX2__
-            for (; c + 8 <= C; c += 8) {
-                __m256 v = _mm256_loadu_ps(dw_out + hw*C + c);
-                v = _mm256_add_ps(v, _mm256_loadu_ps(mlp_b3 + c));
-                v = _mm256_fmadd_ps(v, _mm256_loadu_ps(gamma + c), _mm256_loadu_ps(residual + hw*C + c));
-                _mm256_storeu_ps(x_hwc + hw*C + c, v);
-            }
-#endif
-            for (; c < C; c++)
-                x_hwc[hw*C+c] = (dw_out[hw*C+c] + mlp_b3[c]) * gamma[c] + residual[hw*C+c];
-        }
+        matmul_wpbrg(t1, x_hwc, mlp_b3, gamma, residual, HW, rank, C, fp3);
     }
 }
 
@@ -686,38 +681,21 @@ static void edgeface_forward(const float* input_chw, /* [3, 112, 112] */
 
     /* === STEM: Conv 3→32 4×4 s4 → output directly in HWC === */
     {
-        const float* sw = W(0); /* [32, 3, 4, 4] OIHW */
-        const float* sb = W(1); /* [32] */
+        float* stem_cols = work; /* [784, 3*4*4] */
         for (int oy = 0; oy < 28; oy++)
             for (int ox = 0; ox < 28; ox++) {
-                float* o = x + (oy * 28 + ox) * 32;
-                int co = 0;
-#ifdef __AVX2__
-                for (; co + 8 <= 32; co += 8)
-                    _mm256_storeu_ps(o + co, _mm256_loadu_ps(sb + co));
-#endif
-                for (; co < 32; co++) o[co] = sb[co];
+                float* row = stem_cols + ((size_t)oy * 28 + ox) * 48;
+                int k = 0;
                 for (int ci = 0; ci < 3; ci++)
-                    for (int ky = 0; ky < 4; ky++)
-                        for (int kx = 0; kx < 4; kx++) {
-                            float iv = input_chw[(size_t)ci*112*112 + (oy*4+ky)*112 + ox*4+kx];
-                            co = 0;
-#ifdef __AVX2__
-                            __m256 va = _mm256_set1_ps(iv);
-                            for (; co + 8 <= 32; co += 8) {
-                                int wi = (co * 3 + ci) * 16 + ky * 4 + kx;
-                                /* Gather weights: w[co+j, ci, ky, kx] for j=0..7 */
-                                float wv[8];
-                                for (int j = 0; j < 8; j++)
-                                    wv[j] = sw[((co+j)*3+ci)*16 + ky*4+kx];
-                                _mm256_storeu_ps(o+co, _mm256_fmadd_ps(va, _mm256_loadu_ps(wv),
-                                    _mm256_loadu_ps(o+co)));
-                            }
-#endif
-                            for (; co < 32; co++)
-                                o[co] += iv * sw[(co*3+ci)*16 + ky*4+kx];
-                        }
+                    for (int ky = 0; ky < 4; ky++) {
+                        const float* src = input_chw + (size_t)ci * 112 * 112 + (oy * 4 + ky) * 112 + ox * 4;
+                        row[k++] = src[0];
+                        row[k++] = src[1];
+                        row[k++] = src[2];
+                        row[k++] = src[3];
+                    }
             }
+        matmul_fp32_packed_bias(stem_cols, weights->fp[0].data, W(1), x, 784, 48, 32);
     }
 
     layer_norm_fp32(x, 784, 32, W(2), W(3), 1e-6f, x);
@@ -746,9 +724,7 @@ static void edgeface_forward(const float* input_chw, /* [3, 112, 112] */
     /* === DOWNSAMPLE 0→1: LN(40,41) + Conv 32→64 2×2 s2 (42,43) — all HWC === */
     layer_norm_fp32(x, 784, 32, W(40), W(41), 1e-6f, x);
     {
-        float tmp_hwc[196 * 64];
-        conv2d_hwc(x, 32, 28, 28, W(42), W(43), 64, 2, 2, tmp_hwc);
-        memcpy(x, tmp_hwc, 196 * 64 * sizeof(float));
+        conv2d_hwc_packed(x, 32, 28, 28, W(43), 64, 2, 2, FP(42), work, x);
     }
 
     /* === STAGE 1: 2 ConvNeXt blocks (C=64, K=5, rank=38, hidden=256) === */
@@ -785,9 +761,7 @@ static void edgeface_forward(const float* input_chw, /* [3, 112, 112] */
     /* === DOWNSAMPLE 1→2: LN(101,102) + Conv 64→100 2×2 s2 (103,104) — HWC === */
     layer_norm_fp32(x, 196, 64, W(101), W(102), 1e-6f, x);
     {
-        float tmp_hwc[49 * 100];
-        conv2d_hwc(x, 64, 14, 14, W(103), W(104), 100, 2, 2, tmp_hwc);
-        memcpy(x, tmp_hwc, 49 * 100 * sizeof(float));
+        conv2d_hwc_packed(x, 64, 14, 14, W(104), 100, 2, 2, FP(103), work, x);
     }
 
     /* === STAGE 2: 8 ConvNeXt blocks === */
@@ -825,9 +799,7 @@ static void edgeface_forward(const float* input_chw, /* [3, 112, 112] */
     layer_norm_fp32(x, 49, 100, W(221), W(222), 1e-6f, x);
     {
         int Ho = (7-2)/2+1; /* =3 */
-        float tmp_hwc[9 * 192]; /* 3×3 × 192 */
-        conv2d_hwc(x, 100, 7, 7, W(223), W(224), 192, 2, 2, tmp_hwc);
-        memcpy(x, tmp_hwc, (size_t)Ho * Ho * 192 * sizeof(float));
+        conv2d_hwc_packed(x, 100, 7, 7, W(224), 192, 2, 2, FP(223), work, x);
     }
     int H3 = 3, W3 = 3;
 
@@ -865,65 +837,23 @@ static void edgeface_forward(const float* input_chw, /* [3, 112, 112] */
     /* Global average pool: x[H3*W3, 192] → mean across positions → [192] */
     float pooled[192];
     int HW3 = H3 * W3;
-    for (int c = 0; c < 192; c++) {
-        float sum = 0;
-        for (int hw = 0; hw < HW3; hw++) sum += x[hw * 192 + c];
-        pooled[c] = sum / HW3;
-    }
+    hwc_mean<192>(x, HW3, pooled);
 
     /* LN(280,281) */
     layer_norm_fp32(pooled, 1, 192, W(280), W(281), 1e-6f, pooled);
 
-    /* FC: 192→115 (W283 = [115,192] transposed → use as [192,115] directly) */
-    /* W283 stored as Gemm transB: W[n,k]. We need pooled[k]*W[n,k] = pooled @ W^T.
-     * But our packed matmul does A[M,K] @ B[K,N]. Here A=pooled[1,192], need B=[192,115].
-     * W283 is [115,192] — this is the TRANSPOSED version. Need to transpose at load time
-     * or use it as-is with a transposed dot product. Since M=1, just use vectorized dots. */
+    /* FC weights are stored as [N,K]; prepacked copies use [K,N]. */
     float fc1[115];
     {
-        const float* wt = W(283); /* [115, 192] = w[n, k] */
-        for (int n = 0; n < 115; n++) {
-            float sum = 0;
-            int k = 0;
-#ifdef __AVX2__
-            __m256 vs = _mm256_setzero_ps();
-            for (; k + 8 <= 192; k += 8)
-                vs = _mm256_fmadd_ps(_mm256_loadu_ps(pooled+k), _mm256_loadu_ps(wt+n*192+k), vs);
-            /* Horizontal sum */
-            __m128 lo = _mm256_castps256_ps128(vs);
-            __m128 hi = _mm256_extractf128_ps(vs, 1);
-            lo = _mm_add_ps(lo, hi);
-            lo = _mm_add_ps(lo, _mm_movehl_ps(lo, lo));
-            lo = _mm_add_ss(lo, _mm_movehdup_ps(lo));
-            sum = _mm_cvtss_f32(lo);
-#endif
-            for (; k < 192; k++) sum += pooled[k] * wt[n*192+k];
-            fc1[n] = sum;
-        }
+        matmul_wp(pooled, fc1, 1, 192, 115, FP(283));
     }
 
     /* FC: 115→512 + bias */
     {
-        const float* wt = W(284); /* [512, 115] = w[n, k] */
-        const float* bias = W(285);
-        for (int n = 0; n < 512; n++) {
-            float sum = bias[n];
-            int k = 0;
-#ifdef __AVX2__
-            __m256 vs = _mm256_setzero_ps();
-            for (; k + 8 <= 115; k += 8)
-                vs = _mm256_fmadd_ps(_mm256_loadu_ps(fc1+k), _mm256_loadu_ps(wt+n*115+k), vs);
-            __m128 lo = _mm256_castps256_ps128(vs);
-            __m128 hi = _mm256_extractf128_ps(vs, 1);
-            lo = _mm_add_ps(lo, hi);
-            lo = _mm_add_ps(lo, _mm_movehl_ps(lo, lo));
-            lo = _mm_add_ss(lo, _mm_movehdup_ps(lo));
-            sum += _mm_cvtss_f32(lo);
-#endif
-            for (; k < 115; k++) sum += fc1[k] * wt[n*115+k];
-            embedding[n] = sum;
-        }
+        matmul_wpb(fc1, embedding, W(285), 1, 115, 512, FP(284));
     }
+
+    l2_normalize_fp32(embedding, 1, 512, 1e-12f);
 
     /* x and work are static — no free needed */
 }
@@ -947,9 +877,6 @@ static int engine_init(const char* weights_path, Weights* weights) {
 
     /* Pre-pack MatMul weights to INT8 c8 format */
     {
-        extern void pack_weights_4x8c8(const int8_t*, const float*, int, int, void*, int32_t*);
-        extern int packed_weights_size_4x8c8(int, int);
-
         /* MatMul weight indices (2D tensors used in MatMul) */
         int mm_idx[] = {8,9,14,15,22,23,25,26,33,34,36,37,48,49,51,52,59,60,62,63,
                         74,75,87,88,94,95,97,98,109,110,112,113,120,121,123,124,
@@ -1040,10 +967,8 @@ static int engine_init(const char* weights_path, Weights* weights) {
         }
     }
 
-    /* Pre-pack FP32 MatMul weights into column-panel format [ceil(N/8), K, 8] */
+    /* Pre-pack FP32 MatMul weights into column-panel format [ceil(N/16), K, 16] */
     {
-        extern void pack_b_fp32(const float*, int, int, float*);
-        extern int packed_b_fp32_size(int, int);
         /* Same indices and shapes as INT8 packing */
         int fp_idx[] = {8,9,14,15,22,23,25,26,33,34,36,37,48,49,51,52,59,60,62,63,
                         74,75,87,88,94,95,97,98, /* stage 1 XCA */
@@ -1095,7 +1020,7 @@ static int engine_init(const char* weights_path, Weights* weights) {
         }
     }
 
-    /* Pre-transpose DW conv weights: [C, K*K] → [K*K, C] for HWC AVX2 loads */
+    /* Pre-transpose DW conv weights: [C, K*K] → [K*K, C] for HWC loads */
     /* DW weight tensor indices from names.txt */
     int dw_indices[] = {4,18,29, 44,55, 66, 105,116,127,138,149,160,171,182, 193,195,
                         225,236, 247,249,251, -1};
@@ -1157,10 +1082,41 @@ static int engine_init(const char* weights_path, Weights* weights) {
         }
     }
 
-    /* Reorder downsample conv weights: OIHW [Cout,Cin,K,K] → [Cin*KK, Cout] for AVX2 */
+    /* Reorder stem/downsample conv weights: OIHW [Cout,Cin,K,K] → [Cin*KK, Cout] */
+    conv2d_hwc_reorder_weights(weights->tensors[0], 32, 3, 16);    /* stem: 3→32 4×4 */
     conv2d_hwc_reorder_weights(weights->tensors[42], 64, 32, 4);   /* ds 0→1: 32→64 2×2 */
     conv2d_hwc_reorder_weights(weights->tensors[103], 100, 64, 4); /* ds 1→2: 64→100 2×2 */
     conv2d_hwc_reorder_weights(weights->tensors[223], 192, 100, 4);/* ds 2→3: 100→192 2×2 */
+
+    {
+        const int conv_idx[] = {0, 42, 103, 223};
+        const int conv_k[] = {48, 128, 256, 400};
+        const int conv_n[] = {32, 64, 100, 192};
+        for (int i = 0; i < 4; i++) {
+            int idx = conv_idx[i];
+            int K_ = conv_k[i];
+            int N_ = conv_n[i];
+            int sz = packed_b_fp32_size(K_, N_);
+            float* packed;
+#ifdef _WIN32
+            packed = (float*)_aligned_malloc((size_t)sz * sizeof(float), 64);
+#else
+            if (posix_memalign((void**)&packed, 64, (size_t)sz * sizeof(float)) != 0) packed = NULL;
+#endif
+            if (!packed) packed = (float*)malloc((size_t)sz * sizeof(float));
+            pack_b_fp32(weights->tensors[idx], K_, N_, packed);
+            weights->fp[idx].data = packed;
+            weights->fp[idx].K = K_;
+            weights->fp[idx].N = N_;
+        }
+    }
+
+    pack_transposed_fc_weight(weights->tensors[283], 192, 115, &weights->fp[283]);
+    pack_transposed_fc_weight(weights->tensors[284], 115, 512, &weights->fp[284]);
+
+    pack_folded_projection_weight(weights->tensors[87], weights->tensors[88], 64, 38, &weights->fp[87]);
+    pack_folded_projection_weight(weights->tensors[207], weights->tensors[208], 100, 60, &weights->fp[207]);
+    pack_folded_projection_weight(weights->tensors[263], weights->tensors[264], 192, 115, &weights->fp[263]);
 
     /* Register JIT kernels for small-K matmuls (optional — link jit_gemm.c) */
 #ifdef USE_JIT
@@ -1271,6 +1227,11 @@ int main(int argc, char** argv) {
 
         struct timespec t0, t1;
         int ITERS = 200;
+        const char* iters_env = getenv("FACEX_BENCH_ITERS");
+        if (iters_env) {
+            int parsed = atoi(iters_env);
+            if (parsed > 0) ITERS = parsed;
+        }
         clock_gettime(CLOCK_MONOTONIC, &t0);
         for (int i = 0; i < ITERS; i++)
             edgeface_forward(input, &weights, embedding);

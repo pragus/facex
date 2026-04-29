@@ -1,5 +1,5 @@
 /*
- * gemm_stub.c — Stub for INT8 GEMM when AVX2 is not available (WASM build).
+ * gemm_stub.c — Stub for INT8 GEMM in the WASM build.
  * The engine falls back to FP32 matmul when packed weights are NULL.
  */
 

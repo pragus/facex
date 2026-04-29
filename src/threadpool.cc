@@ -15,6 +15,7 @@
 #include <process.h>
 #else
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 #include <linux/futex.h>
 #include <sys/syscall.h>
@@ -64,6 +65,14 @@ static Worker g_workers[MAX_THREADS];
 static int g_n_threads = 0;
 static volatile int g_shutdown = 0;
 
+static inline void tp_cpu_relax(void) {
+#ifdef _WIN32
+    SwitchToThread();
+#else
+    sched_yield();
+#endif
+}
+
 /* Worker function: spin-wait for work, execute chunks, signal done */
 static
 #ifdef _WIN32
@@ -84,11 +93,7 @@ worker_fn(void* arg) {
             while (spins-- > 0) {
                 phase = ATOMIC_LOAD(&g_task.phase);
                 if (phase != last_phase) break;
-                #ifdef _WIN32
-                YieldProcessor();
-                #else
-                __asm__ __volatile__("pause");
-                #endif
+                tp_cpu_relax();
             }
             if (phase == last_phase) {
                 /* Sleep until woken */
@@ -191,11 +196,7 @@ void tp_parallel_for(tp_task_fn fn, void* ctx, int total, int grain) {
 
     /* Wait for workers to finish */
     while (ATOMIC_LOAD(&g_task.done_count) < n_workers) {
-        #ifdef _WIN32
-        YieldProcessor();
-        #else
-        __asm__ __volatile__("pause");
-        #endif
+        tp_cpu_relax();
     }
 }
 

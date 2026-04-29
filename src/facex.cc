@@ -15,7 +15,7 @@
 #ifndef FACEX_LIB
 #define FACEX_LIB
 #endif
-#include "edgeface_engine.c"
+#include "edgeface_engine.cc"
 
 /* External: alignment */
 extern void align_face(const uint8_t* src_rgb, int src_w, int src_h,
